@@ -71,6 +71,54 @@ export default function MainPage() {
     }
   }, []);
 
+  // 註冊 Service Worker 與處理 PWA 分享進來的文件
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    // 1. 註冊 PWA Service Worker (支援分享目標)
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker
+        .register("/PDF-Util/sw.js", { scope: "/PDF-Util/" })
+        .then((reg) => console.log("PWA Share Target Service Worker 註冊成功，Scope:", reg.scope))
+        .catch((err) => console.error("PWA Service Worker 註冊失敗:", err));
+    }
+
+    // 2. 檢測是否有系統分享進來的檔案
+    const checkSharedFile = async () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get("shared") === "true") {
+        try {
+          setIsLoading(true);
+          const cache = await caches.open("shared-pdf-cache-v1");
+          const response = await cache.match("/shared-file.pdf");
+          
+          if (response) {
+            const blob = await response.blob();
+            // 包裝為 File 物件
+            const sharedFile = new File([blob], "shared_document.pdf", {
+              type: "application/pdf",
+            });
+            
+            // 載入該 PDF 檔案
+            await handleFileSelect(sharedFile);
+            
+            // 清除快取中的暫存檔案，防二次載入
+            await cache.delete("/shared-file.pdf");
+          }
+          
+          // 清除 URL 上的分享參數，保持乾淨
+          window.history.replaceState({}, document.title, "/PDF-Util/");
+        } catch (error) {
+          console.error("讀取分享檔案失敗:", error);
+        } finally {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    checkSharedFile();
+  }, []);
+
   const handleToggleDarkMode = () => {
     const nextDark = !isDarkMode;
     setIsDarkMode(nextDark);
