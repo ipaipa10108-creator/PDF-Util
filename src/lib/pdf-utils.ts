@@ -204,5 +204,5 @@ export async function exportPdf({
   
   // 5. 輸出 PDF 位元組並打包為 Blob
   const pdfBytes = await newDoc.save();
-  return new Blob([pdfBytes], { type: "application/pdf" });
+  return new Blob([pdfBytes.buffer as ArrayBuffer], { type: "application/pdf" });
 }
