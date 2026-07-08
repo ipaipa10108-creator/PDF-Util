@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import confetti from "canvas-confetti";
-import { ShieldCheck, Lock, Share2, AlertTriangle, FileText, CheckCircle2, ChevronRight, LayoutGrid } from "lucide-react";
+import { ShieldCheck, Lock, Share2, AlertTriangle, FileText, CheckCircle2, ChevronRight, LayoutGrid, RotateCw, Trash2, FileSignature, FilePlus2 } from "lucide-react";
 import { Header } from "@/components/pdf-suite/header";
 import { Dropzone } from "@/components/pdf-suite/dropzone";
 import { ThumbnailGrid } from "@/components/pdf-suite/thumbnail-grid";
@@ -286,19 +286,39 @@ export default function MainPage() {
     setExportedBlob(null);
   };
 
+  // 統一生成 PDF Blob 的邏輯，支援僅導出/分享被勾選的頁面
+  const generatePdfBlob = async (): Promise<Blob | null> => {
+    if (!file) return null;
+
+    const hasSelection = selectedIndices.size > 0;
+    
+    // 如果有勾選某些頁面，則在導出時將未勾選的頁面標記為刪除 (不寫入最終 PDF)
+    let pagesToExport = pages;
+    if (hasSelection) {
+      pagesToExport = pages.map(p => {
+        if (!selectedIndices.has(p.pageIndex)) {
+          return { ...p, isDeleted: true };
+        }
+        return p;
+      });
+    }
+
+    return await exportPdf({
+      filesMap,
+      pages: pagesToExport,
+      signatures: placedSignatures,
+      savedSignatures,
+    });
+  };
+
   // 匯出 PDF
   const handleExport = async () => {
     if (!file) return;
-
     setIsExporting(true);
     
     try {
-      const blob = await exportPdf({
-        filesMap,
-        pages,
-        signatures: placedSignatures,
-        savedSignatures,
-      });
+      const blob = await generatePdfBlob();
+      if (!blob) return;
 
       setExportedBlob(blob);
 
@@ -310,7 +330,7 @@ export default function MainPage() {
       a.click();
       URL.revokeObjectURL(url);
 
-      // 觸發彩花特效 (Wow factor)
+      // 觸發彩花特效
       confetti({
         particleCount: 110,
         spread: 80,
@@ -328,10 +348,14 @@ export default function MainPage() {
 
   // Web Share 原生分享
   const handleShare = async () => {
-    if (!file || !exportedBlob) return;
+    if (!file) return;
+    setIsExporting(true); // 進入導出中狀態
 
     try {
-      const fileToShare = new File([exportedBlob], `edited_${file.name}`, {
+      const blob = await generatePdfBlob();
+      if (!blob) return;
+
+      const fileToShare = new File([blob], `edited_${file.name}`, {
         type: "application/pdf",
       });
 
@@ -340,13 +364,17 @@ export default function MainPage() {
         await nav.share({
           files: [fileToShare],
           title: "分享您的 PDF 文件",
-          text: "這是使用 Local PDF Suite 編輯並完成電子簽署的文件。",
+          text: selectedIndices.size > 0 
+            ? `這是您勾選分享的 PDF 頁面 (${selectedIndices.size} 頁)。` 
+            : "這是使用 Local PDF Suite 編輯並完成電子簽署的文件。",
         });
       } else {
         alert("此瀏覽器/系統不支援分享該 PDF 檔案。");
       }
     } catch (error) {
       console.error("Error calling navigator.share", error);
+    } finally {
+      setIsExporting(false);
     }
   };
 
@@ -382,7 +410,7 @@ export default function MainPage() {
         onShare={handleShare}
         onReset={handleReset}
         isExporting={isExporting}
-        canShare={canShare && !!exportedBlob}
+        canShare={canShare}
         isDarkMode={isDarkMode}
         onToggleDarkMode={handleToggleDarkMode}
       />
@@ -487,6 +515,60 @@ export default function MainPage() {
           onClose={() => setIsInsertModalOpen(false)}
           onConfirmInsert={handleConfirmInsert}
         />
+      )}
+
+      {/* 手機端底部懸浮操作列 */}
+      {file && (
+        <div className="fixed bottom-6 left-4 right-4 z-30 md:hidden flex items-center justify-around rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 px-4 py-3.5 shadow-xl backdrop-blur-md animate-slide-up">
+          {/* 快速選取/清空 */}
+          <button
+            onClick={selectedIndices.size === pages.filter(p => !p.isDeleted).length ? handleSelectNone : handleSelectAll}
+            className="flex flex-col items-center gap-1.5 text-[10px] font-bold text-slate-600 dark:text-slate-400 active:text-indigo-500"
+          >
+            <span className="text-sm">
+              {selectedIndices.size > 0 ? "☑" : "☐"}
+            </span>
+            <span>{selectedIndices.size > 0 ? "清空" : "全選"}</span>
+          </button>
+
+          {/* 旋轉 90° */}
+          <button
+            onClick={() => handleRotateSelected(90)}
+            disabled={selectedIndices.size === 0}
+            className="flex flex-col items-center gap-1.5 text-[10px] font-bold text-slate-600 dark:text-slate-400 disabled:opacity-30 active:text-indigo-500"
+          >
+            <RotateCw className="h-4.5 w-4.5" />
+            <span>旋轉 90°</span>
+          </button>
+
+          {/* 刪除 */}
+          <button
+            onClick={handleDeleteSelected}
+            disabled={selectedIndices.size === 0}
+            className="flex flex-col items-center gap-1.5 text-[10px] font-bold text-red-500 disabled:opacity-30"
+          >
+            <Trash2 className="h-4.5 w-4.5" />
+            <span>刪除</span>
+          </button>
+
+          {/* 插入 */}
+          <button
+            onClick={() => setIsInsertModalOpen(true)}
+            className="flex flex-col items-center gap-1.5 text-[10px] font-bold text-slate-600 dark:text-slate-400 active:text-indigo-500"
+          >
+            <FilePlus2 className="h-4.5 w-4.5" />
+            <span>插入</span>
+          </button>
+
+          {/* 簽名 */}
+          <button
+            onClick={() => setIsSignatureModalOpen(true)}
+            className="flex flex-col items-center gap-1.5 text-[10px] font-bold text-indigo-500"
+          >
+            <FileSignature className="h-4.5 w-4.5" />
+            <span>簽章</span>
+          </button>
+        </div>
       )}
 
       {/* 頁尾 */}

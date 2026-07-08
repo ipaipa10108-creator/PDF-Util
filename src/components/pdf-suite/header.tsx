@@ -119,7 +119,7 @@ export function Header({
         {/* 右側操作按鈕 */}
         <div className="flex items-center gap-2">
           {fileName && (
-            <div className="flex items-center gap-1.5 border-r border-slate-200 dark:border-slate-800 pr-3 mr-1">
+            <div className="hidden md:flex items-center gap-1.5 border-r border-slate-200 dark:border-slate-800 pr-3 mr-1">
               {/* 旋轉功能按鈕 */}
               <button
                 onClick={() => onRotateSelected(270)}
@@ -193,11 +193,11 @@ export function Header({
               <button
                 onClick={onExport}
                 disabled={isExporting}
-                className="flex items-center gap-1.5 h-9 px-3 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-500 text-white font-semibold text-xs hover:from-indigo-600 hover:to-violet-600 shadow-md shadow-indigo-500/20 hover:scale-[1.02] active:scale-95 disabled:opacity-50 disabled:scale-100 disabled:hover:from-indigo-500 transition-all"
+                className="flex items-center gap-1.5 h-9 px-2 sm:px-3 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-500 text-white font-semibold text-xs hover:from-indigo-600 hover:to-violet-600 shadow-md shadow-indigo-500/20 hover:scale-[1.02] active:scale-95 disabled:opacity-50 disabled:scale-100 disabled:hover:from-indigo-500 transition-all"
                 title="下載編輯後的 PDF"
               >
                 <Download className="h-4 w-4" />
-                <span>{isExporting ? "導出中..." : "下載"}</span>
+                <span className="hidden sm:inline">{isExporting ? "導出中..." : "下載"}</span>
               </button>
 
               {canShare && (
