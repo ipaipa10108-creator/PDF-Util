@@ -6,7 +6,7 @@ export const metadata: Metadata = {
   description: "100% 本地端執行的 PDF 編輯與簽章工具，保證隱私與安全，提供旋轉、刪除、裁切、電子簽章壓印及原生分享功能。",
 };
 
-export function RootLayout({
+export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
@@ -19,5 +19,3 @@ export function RootLayout({
     </html>
   );
 }
-
-export default RootLayout;

@@ -17,7 +17,7 @@ import {
   exportPdf 
 } from "@/lib/pdf-utils";
 
-export function MainPage() {
+export default function MainPage() {
   const [file, setFile] = useState<File | null>(null);
   const [pages, setPages] = useState<PdfPageInfo[]>([]);
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
@@ -442,4 +442,4 @@ export function MainPage() {
   );
 }
 
-export default MainPage;
+
