@@ -228,8 +228,10 @@ export default function MainPage() {
 
   // 處理視窗拖曳事件，實現拖入第二個檔案自動做插入
   const handleWindowDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    if (file) {
+    // 僅當拖曳的是系統外部檔案，且目前已有主檔案載入時，才啟動插入覆蓋層
+    const isFiles = e.dataTransfer && e.dataTransfer.types.includes("Files");
+    if (isFiles && file) {
+      e.preventDefault();
       setIsDragOverWindow(true);
     }
   };
