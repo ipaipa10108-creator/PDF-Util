@@ -27,6 +27,8 @@ export default function MainPage() {
   const [file, setFile] = useState<File | null>(null);
   const [filesMap, setFilesMap] = useState<Record<string, File>>({});
   const [isInsertModalOpen, setIsInsertModalOpen] = useState(false);
+  const [presetInsertFile, setPresetInsertFile] = useState<File | null>(null);
+  const [isDragOverWindow, setIsDragOverWindow] = useState(false);
   const [pages, setPages] = useState<PdfPageInfo[]>([]);
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
   const [placedSignatures, setPlacedSignatures] = useState<PlacedSignature[]>([]);
@@ -187,6 +189,70 @@ export default function MainPage() {
       alert("無法插入 PDF 頁面，詳細原因：" + (error instanceof Error ? error.message : String(error)));
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // 處理拖曳頁面重排
+  const handleReorderPages = (draggedIndex: number, hoverIndex: number) => {
+    setPages(prevPages => {
+      const updated = [...prevPages];
+      const [draggedPage] = updated.splice(draggedIndex, 1);
+      updated.splice(hoverIndex, 0, draggedPage);
+      
+      return updated.map((p, idx) => ({
+        ...p,
+        pageIndex: idx,
+        pageNumber: idx + 1,
+      }));
+    });
+    setExportedBlob(null);
+  };
+
+  // 處理指定移動位置
+  const handleMovePagePosition = (fromIndex: number, toIndexAfter: number) => {
+    setPages(prevPages => {
+      const updated = [...prevPages];
+      const [movedPage] = updated.splice(fromIndex, 1);
+      
+      const insertIndex = fromIndex < toIndexAfter ? toIndexAfter - 1 : toIndexAfter;
+      updated.splice(insertIndex, 0, movedPage);
+      
+      return updated.map((p, idx) => ({
+        ...p,
+        pageIndex: idx,
+        pageNumber: idx + 1,
+      }));
+    });
+    setExportedBlob(null);
+  };
+
+  // 處理視窗拖曳事件，實現拖入第二個檔案自動做插入
+  const handleWindowDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (file) {
+      setIsDragOverWindow(true);
+    }
+  };
+
+  const handleWindowDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOverWindow(false);
+  };
+
+  const handleWindowDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOverWindow(false);
+    
+    if (!file) return; // 如果沒載入檔案，走 Dropzone 預設行為
+
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      const droppedFile = e.dataTransfer.files[0];
+      if (droppedFile.type === "application/pdf") {
+        setPresetInsertFile(droppedFile);
+        setIsInsertModalOpen(true);
+      } else {
+        alert("只支援拖放 PDF 格式之檔案進行插入。");
+      }
     }
   };
 
@@ -439,7 +505,27 @@ export default function MainPage() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col bg-slate-50 text-slate-900 transition-colors duration-200 dark:bg-slate-950 dark:text-slate-50">
+    <div 
+      onDragOver={handleWindowDragOver}
+      onDragLeave={handleWindowDragLeave}
+      onDrop={handleWindowDrop}
+      className="flex min-h-screen flex-col bg-slate-50 text-slate-900 transition-colors duration-200 dark:bg-slate-950 dark:text-slate-50 relative"
+    >
+      
+      {/* 視窗拖曳插入外部 PDF 的懸浮覆蓋層 */}
+      {isDragOverWindow && file && (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-indigo-500/10 dark:bg-indigo-950/20 backdrop-blur-md pointer-events-none">
+          <div className="flex flex-col items-center justify-center p-12 rounded-3xl border-4 border-dashed border-indigo-500 bg-white/95 dark:bg-slate-900/95 shadow-2xl animate-pulse">
+            <FilePlus2 className="h-16 w-16 text-indigo-500 mb-4 animate-bounce" />
+            <p className="text-base font-bold text-slate-800 dark:text-slate-100">
+              放開以插入此 PDF 文件
+            </p>
+            <p className="text-xs text-slate-400 mt-1">
+              該文件將會被直接載入至插頁對話框中
+            </p>
+          </div>
+        </div>
+      )}
       
       {/* 頂部工具列 */}
       <Header
@@ -507,6 +593,8 @@ export default function MainPage() {
                 onOpenCropModal={(idx) => setCropPageIndex(idx)}
                 onUpdateSignatures={handleUpdateSignatures}
                 onAddPlacedSignature={handleAddPlacedSignature}
+                onReorderPages={handleReorderPages}
+                onMovePagePosition={handleMovePagePosition}
               />
             </div>
             
@@ -560,7 +648,11 @@ export default function MainPage() {
       {isInsertModalOpen && (
         <InsertModal
           mainPdfTotalPages={pages.filter(p => !p.isDeleted).length}
-          onClose={() => setIsInsertModalOpen(false)}
+          presetFile={presetInsertFile}
+          onClose={() => {
+            setIsInsertModalOpen(false);
+            setPresetInsertFile(null);
+          }}
           onConfirmInsert={handleConfirmInsert}
         />
       )}

@@ -1,5 +1,5 @@
-import React from "react";
-import { RotateCw, Trash2, Undo, Crop, Check } from "lucide-react";
+import React, { useState } from "react";
+import { RotateCw, Trash2, Undo, Crop, Check, Move, X } from "lucide-react";
 import { PdfPageInfo, PlacedSignature, SavedSignature } from "@/lib/pdf-utils";
 import { SignatureLayer } from "./signature-layer";
 
@@ -16,6 +16,8 @@ export interface ThumbnailGridProps {
   onOpenCropModal: (pageIndex: number) => void;
   onUpdateSignatures: (signatures: PlacedSignature[]) => void;
   onAddPlacedSignature: (sig: PlacedSignature) => void;
+  onReorderPages: (draggedIndex: number, hoverIndex: number) => void; // 拖曳重排
+  onMovePagePosition: (fromIndex: number, toIndexAfter: number) => void; // 指定位置移動
 }
 
 export function ThumbnailGrid({
@@ -31,8 +33,20 @@ export function ThumbnailGrid({
   onOpenCropModal,
   onUpdateSignatures,
   onAddPlacedSignature,
+  onReorderPages,
+  onMovePagePosition,
 }: ThumbnailGridProps) {
   
+  const isPlacementMode = !!activeSignatureId;
+
+  // 拖曳狀態
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+
+  // 行內移動位置狀態
+  const [movingPageIndex, setMovingPageIndex] = useState<number | null>(null);
+  const [targetPosition, setTargetPosition] = useState<string>("");
+
   const handlePageClick = (e: React.MouseEvent<HTMLDivElement>, page: PdfPageInfo) => {
     if (page.isDeleted) return;
 
@@ -70,56 +84,85 @@ export function ThumbnailGrid({
       onAddPlacedSignature(newPlacedSig);
     } else {
       // 否則，一般的點擊為切換該頁面的選取狀態
-      // 如果點選的是頁面控制項按鈕，則在按鈕 handler 中阻止冒泡，因此這裡只處理卡片本體點擊
       onToggleSelect(page.pageIndex);
     }
   };
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-      <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+      {/* 拖曳操作說明小字 */}
+      {!isPlacementMode && pages.length > 1 && (
+        <p className="text-[10px] text-slate-400 mb-4 text-center">
+          💡 提示：您可以直接<b>拖曳頁面</b>以調整其順序，或者點擊頁面下方的「<b>移動</b>」按鈕指定定位。
+        </p>
+      )}
+
+      <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 animate-fade-in">
         {pages.map((page) => {
           const isSelected = selectedIndices.has(page.pageIndex);
-          const isPlacementMode = !!activeSignatureId && !page.isDeleted;
-          
+          const isDraggingThis = draggedIndex === page.pageIndex;
+          const isHoveredOverThis = dragOverIndex === page.pageIndex && !isDraggingThis;
+
           return (
             <div
-              key={page.pageIndex}
-              className={`group relative flex flex-col items-center rounded-2xl border bg-white/40 dark:bg-slate-900/40 p-4 transition-all duration-300
-                ${page.isDeleted 
-                  ? "border-slate-200 dark:border-slate-800 opacity-60" 
-                  : isSelected 
-                    ? "border-indigo-500 shadow-lg shadow-indigo-500/10 dark:border-indigo-500/80 bg-indigo-500/[0.02]" 
-                    : "border-slate-200 hover:border-slate-300 dark:border-slate-800 dark:hover:border-slate-700"
+              key={page.id}
+              draggable={!isPlacementMode && !page.isDeleted}
+              onDragStart={(e) => {
+                if (isPlacementMode || page.isDeleted) return;
+                setDraggedIndex(page.pageIndex);
+                e.dataTransfer.effectAllowed = "move";
+              }}
+              onDragOver={(e) => {
+                if (isPlacementMode || page.isDeleted) return;
+                e.preventDefault();
+                setDragOverIndex(page.pageIndex);
+              }}
+              onDragEnd={() => {
+                setDraggedIndex(null);
+                setDragOverIndex(null);
+              }}
+              onDrop={(e) => {
+                if (isPlacementMode || page.isDeleted) return;
+                e.preventDefault();
+                if (draggedIndex !== null && draggedIndex !== page.pageIndex) {
+                  onReorderPages(draggedIndex, page.pageIndex);
                 }
+                setDraggedIndex(null);
+                setDragOverIndex(null);
+              }}
+              className={`group relative flex flex-col items-center rounded-2xl border p-4.5 transition-all duration-300 bg-white dark:bg-slate-900 shadow-sm
+                ${isSelected 
+                  ? "border-indigo-500 bg-indigo-500/[0.01] ring-1 ring-indigo-500 dark:ring-indigo-500/80 shadow-md shadow-indigo-500/5" 
+                  : "border-slate-200 hover:border-slate-300 dark:border-slate-800 dark:hover:border-slate-700"
+                }
+                ${isDraggingThis ? "opacity-30 scale-95" : ""}
+                ${isHoveredOverThis ? "border-dashed border-2 border-indigo-500 bg-indigo-500/5 scale-102" : ""}
               `}
             >
-              
-              {/* 卡片標題：頁碼與核取方塊 */}
-              <div className="flex w-full items-center justify-between mb-3 text-xs font-semibold">
-                <span className="text-slate-500 dark:text-slate-400">
-                  第 {page.pageNumber} 頁
-                </span>
-                
-                {!page.isDeleted && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onToggleSelect(page.pageIndex);
-                    }}
-                    className={`flex h-5 w-5 items-center justify-center rounded border transition-all
-                      ${isSelected 
-                        ? "bg-indigo-500 border-indigo-500 text-white" 
-                        : "border-slate-300 hover:border-indigo-400 dark:border-slate-700 dark:hover:border-indigo-500"
-                      }
-                    `}
-                  >
-                    {isSelected && <Check className="h-3.5 w-3.5 stroke-[3]" />}
-                  </button>
-                )}
-              </div>
+              {/* 多選核取方塊 */}
+              {!page.isDeleted && !isPlacementMode && (
+                <div
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleSelect(page.pageIndex);
+                  }}
+                  className={`absolute top-3 left-3 z-30 flex h-5.5 w-5.5 items-center justify-center rounded-lg border transition-all cursor-pointer shadow-sm
+                    ${isSelected
+                      ? "bg-indigo-500 border-indigo-500 text-white"
+                      : "border-slate-300 dark:border-slate-700 bg-white/90 hover:border-slate-400 dark:bg-slate-950/90"
+                    }
+                  `}
+                >
+                  {isSelected && <Check className="h-3.5 w-3.5 stroke-[3]" />}
+                </div>
+              )}
 
-              {/* PDF 頁面預覽容器 */}
+              {/* 頁碼角標 */}
+              <span className="absolute top-3 right-3 z-20 rounded-md bg-slate-900/60 dark:bg-slate-950/80 text-white font-bold px-2 py-0.5 text-[10px] tracking-wider backdrop-blur-[2px]">
+                {page.pageNumber}
+              </span>
+
+              {/* 縮圖點擊主容器 */}
               <div
                 onClick={(e) => handlePageClick(e, page)}
                 className={`relative w-full overflow-hidden rounded-xl border border-slate-200/60 dark:border-slate-800/60 bg-slate-100 dark:bg-slate-950 transition-all duration-300 shadow-inner cursor-pointer
@@ -154,7 +197,7 @@ export function ThumbnailGrid({
 
                 {/* 刪除狀態覆蓋層 */}
                 {page.isDeleted && (
-                  <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-slate-900/65 backdrop-blur-[1px] text-white">
+                  <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-slate-900/65 backdrop-blur-[1px] text-white animate-fade-in">
                     <span className="text-xs font-semibold tracking-wider opacity-90 mb-2">頁面已刪除</span>
                     <button
                       onClick={(e) => {
@@ -170,7 +213,7 @@ export function ThumbnailGrid({
                 )}
 
                 {/* 簽名放置模式下的懸停引導 */}
-                {isPlacementMode && (
+                {isPlacementMode && !page.isDeleted && (
                   <div className="absolute inset-0 z-10 flex items-center justify-center bg-indigo-500/5 hover:bg-indigo-500/10 transition-colors pointer-events-none">
                     <span className="rounded bg-indigo-500/90 text-white px-2 py-1 text-[10px] font-bold shadow-md tracking-wider">
                       點擊此處放置簽章
@@ -181,41 +224,99 @@ export function ThumbnailGrid({
 
               {/* 頁面下方快速控制列 (當未刪除時) */}
               {!page.isDeleted && (
-                <div className="flex w-full items-center justify-center gap-2 mt-4 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onRotatePage(page.pageIndex, 90);
-                    }}
-                    className="flex h-7 px-2.5 items-center gap-1 rounded bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-[10px] font-bold text-slate-600 dark:text-slate-300 transition-colors"
-                    title="順時針旋轉 90°"
-                  >
-                    <RotateCw className="h-3.5 w-3.5" />
-                    <span>旋轉</span>
-                  </button>
-                  
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onOpenCropModal(page.pageIndex);
-                    }}
-                    className="flex h-7 px-2.5 items-center gap-1 rounded bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-[10px] font-bold text-slate-600 dark:text-slate-300 transition-colors"
-                    title="裁切頁面區域"
-                  >
-                    <Crop className="h-3.5 w-3.5" />
-                    <span>裁切</span>
-                  </button>
+                <div className="w-full">
+                  {movingPageIndex === page.pageIndex ? (
+                    /* 指定移動位置輸入區 */
+                    <div 
+                      className="flex w-full items-center justify-center gap-1 mt-4 animate-fade-in" 
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <span className="text-[9.5px] text-slate-500 font-bold">移至第</span>
+                      <input
+                        type="number"
+                        min="0"
+                        max={pages.length}
+                        value={targetPosition}
+                        onChange={(e) => setTargetPosition(e.target.value)}
+                        placeholder="0-N"
+                        className="w-10 h-7 rounded border border-slate-200 dark:border-slate-800 bg-transparent text-center text-xs focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:text-slate-100"
+                      />
+                      <span className="text-[9.5px] text-slate-500 font-bold">頁後</span>
+                      <button
+                        onClick={() => {
+                          const toPos = parseInt(targetPosition, 10);
+                          if (!isNaN(toPos) && toPos >= 0 && toPos <= pages.length) {
+                            onMovePagePosition(page.pageIndex, toPos);
+                            setMovingPageIndex(null);
+                          } else {
+                            alert(`請輸入有效的目標頁數 (0-${pages.length})。0 代表移至最前面。`);
+                          }
+                        }}
+                        className="flex h-7 w-7 items-center justify-center rounded bg-indigo-500 text-white hover:bg-indigo-600 transition-colors"
+                        title="確認移動"
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        onClick={() => setMovingPageIndex(null)}
+                        className="flex h-7 w-7 items-center justify-center rounded bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 transition-colors"
+                        title="取消"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    /* 預設功能控制列 */
+                    <div className="flex w-full items-center justify-center gap-1.5 mt-4 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onRotatePage(page.pageIndex, 90);
+                        }}
+                        className="flex h-7 px-2 items-center gap-1 rounded bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-[9.5px] font-bold text-slate-600 dark:text-slate-300 transition-colors"
+                        title="順時針旋轉 90°"
+                      >
+                        <RotateCw className="h-3 w-3" />
+                        <span>旋轉</span>
+                      </button>
+                      
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onOpenCropModal(page.pageIndex);
+                        }}
+                        className="flex h-7 px-2 items-center gap-1 rounded bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-[9.5px] font-bold text-slate-600 dark:text-slate-300 transition-colors"
+                        title="裁切頁面區域"
+                      >
+                        <Crop className="h-3 w-3" />
+                        <span>裁切</span>
+                      </button>
 
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDeletePage(page.pageIndex);
-                    }}
-                    className="flex h-7 w-7 items-center justify-center rounded bg-red-50 hover:bg-red-100 dark:bg-red-950/20 dark:hover:bg-red-950/40 text-red-600 dark:text-red-400 transition-colors"
-                    title="刪除此頁面"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setMovingPageIndex(page.pageIndex);
+                          setTargetPosition("");
+                        }}
+                        className="flex h-7 px-2 items-center gap-1 rounded bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-[9.5px] font-bold text-slate-600 dark:text-slate-300 transition-colors"
+                        title="指定移動至特定頁碼"
+                      >
+                        <Move className="h-3 w-3" />
+                        <span>移動</span>
+                      </button>
+
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeletePage(page.pageIndex);
+                        }}
+                        className="flex h-7 w-7 items-center justify-center rounded bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/20 dark:hover:bg-rose-950/40 text-rose-600 dark:text-rose-400 transition-colors"
+                        title="刪除此頁面"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 
