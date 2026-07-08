@@ -38,8 +38,11 @@ async function getPdfjsLib(): Promise<typeof PdfJsType> {
   }
   if (!pdfjsInstance) {
     const pdfjs = await import("pdfjs-dist");
-    // 設定 PDF.js Worker，使用相符版本的 CDN 以支援無伺服器靜態部署
-    pdfjs.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.8.69/pdf.worker.min.mjs";
+    // 使用 Webpack 原生機制載入同源 Worker，避免瀏覽器的 Web Worker 跨域 (CORS) 安全策略限制
+    pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+      "pdfjs-dist/build/pdf.worker.min.mjs",
+      import.meta.url
+    ).toString();
     pdfjsInstance = pdfjs;
   }
   return pdfjsInstance;

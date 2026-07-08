@@ -1,0 +1,24 @@
+{
+  "name": "Local PDF Web Suite",
+  "short_name": "Local PDF",
+  "description": "純本地端安全執行的 PDF 編輯與電子簽署工具",
+  "start_url": "/PDF-Util/",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#6366f1",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/PDF-Util/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/PDF-Util/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

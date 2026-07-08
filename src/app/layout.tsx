@@ -13,6 +13,13 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="zh-TW" className="h-full">
+      <head>
+        <link rel="manifest" href="/PDF-Util/manifest.json" />
+        <meta name="theme-color" content="#6366f1" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <link rel="apple-touch-icon" href="/PDF-Util/icon-192.png" />
+      </head>
       <body className="h-full antialiased">
         {children}
       </body>

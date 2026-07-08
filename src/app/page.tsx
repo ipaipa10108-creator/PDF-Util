@@ -93,7 +93,7 @@ export default function MainPage() {
       setPages(loadedPages);
     } catch (error) {
       console.error("Error loading PDF file", error);
-      alert("無法讀取或解析 PDF 文件，請確保該檔案為標準且未受密碼保護的 PDF。");
+      alert("無法讀取或解析 PDF 文件，請確保該檔案為標準且未受密碼保護的 PDF。\n詳細錯誤資訊：" + (error instanceof Error ? error.message : String(error)));
       setFile(null);
     } finally {
       setIsLoading(false);
