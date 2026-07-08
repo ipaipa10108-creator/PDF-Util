@@ -59,7 +59,7 @@ export function ThumbnailGrid({
 
       const newPlacedSig: PlacedSignature = {
         id: `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
-        pageIndex: page.pageIndex,
+        pageId: page.id,
         signatureImageId: activeSignatureId,
         x,
         y,
@@ -143,7 +143,7 @@ export function ThumbnailGrid({
                 {/* 簽名壓印圖層 (當有在該頁放置簽名且未刪除時) */}
                 {!page.isDeleted && (
                   <SignatureLayer
-                    pageIndex={page.pageIndex}
+                    pageId={page.id}
                     placedSignatures={placedSignatures}
                     savedSignatures={savedSignatures}
                     onUpdateSignatures={onUpdateSignatures}

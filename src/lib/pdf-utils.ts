@@ -2,8 +2,11 @@ import type * as PdfJsType from "pdfjs-dist";
 import { PDFDocument, degrees } from "pdf-lib";
 
 export interface PdfPageInfo {
-  pageIndex: number;
-  pageNumber: number;
+  id: string; // 唯一 ID
+  fileId: string; // 所屬的檔案 ID
+  sourcePageIndex: number; // 在該原始檔案中的 pageIndex (0-based)
+  pageIndex: number; // 目前在 pages 陣列中的顯示順序 index (0-based)
+  pageNumber: number; // 頁碼 (1-based)
   thumbnailUrl: string;
   width: number;
   height: number;
@@ -14,7 +17,7 @@ export interface PdfPageInfo {
 
 export interface PlacedSignature {
   id: string;
-  pageIndex: number;
+  pageId: string; // 使用 pageId 替代 pageIndex
   signatureImageId: string;
   x: number; // 相對位置 (0~1)
   y: number; // 相對位置 (0~1)
@@ -46,12 +49,14 @@ async function getPdfjsLib(): Promise<typeof PdfJsType> {
     pdfjsInstance = pdfjs;
   }
   return pdfjsInstance;
-}
-
-/**
- * 從 File 載入 PDF，並產生每一頁的預覽與尺寸資訊
+}/**
+ * 從 File 載入 PDF，並產生每一頁的預覽與尺寸資訊，支援載入指定頁碼範圍
  */
-export async function loadPdfPages(file: File): Promise<PdfPageInfo[]> {
+export async function loadPdfPages(
+  file: File,
+  fileId: string,
+  targetPageIndices?: number[]
+): Promise<PdfPageInfo[]> {
   const arrayBuffer = await file.arrayBuffer();
   const pdfjs = await getPdfjsLib();
   
@@ -62,8 +67,13 @@ export async function loadPdfPages(file: File): Promise<PdfPageInfo[]> {
   
   const pagesInfo: PdfPageInfo[] = [];
 
-  for (let i = 1; i <= numPages; i++) {
-    const page = await pdfDoc.getPage(i);
+  // 如果有傳入指定頁碼，則使用指定頁碼（0-based 轉成 1-based）；否則，載入全部頁面
+  const indices = targetPageIndices && targetPageIndices.length > 0
+    ? targetPageIndices.map(idx => idx + 1).filter(p => p >= 1 && p <= numPages)
+    : Array.from({ length: numPages }, (_, idx) => idx + 1);
+
+  for (const pageNum of indices) {
+    const page = await pdfDoc.getPage(pageNum);
     // 預設以 1.5 倍縮放渲染縮圖，取得清晰影像
     const viewport = page.getViewport({ scale: 1.5 });
     
@@ -86,8 +96,11 @@ export async function loadPdfPages(file: File): Promise<PdfPageInfo[]> {
     const pdfViewport = page.getViewport({ scale: 1.0 });
     
     pagesInfo.push({
-      pageIndex: i - 1,
-      pageNumber: i,
+      id: `page-${fileId}-${pageNum - 1}-${Math.random().toString(36).substring(2, 9)}`,
+      fileId,
+      sourcePageIndex: pageNum - 1,
+      pageIndex: pageNum - 1,
+      pageNumber: pageNum,
       thumbnailUrl,
       width: pdfViewport.width,
       height: pdfViewport.height,
@@ -99,9 +112,8 @@ export async function loadPdfPages(file: File): Promise<PdfPageInfo[]> {
   
   return pagesInfo;
 }
-
 interface ExportPdfParams {
-  originalFile: File;
+  filesMap: Record<string, File>; // 用於支援多個檔案的 Map，key 為 fileId
   pages: PdfPageInfo[];
   signatures: PlacedSignature[];
   savedSignatures: SavedSignature[];
@@ -111,50 +123,49 @@ interface ExportPdfParams {
  * 根據使用者編輯操作，重組、旋轉、裁切 PDF 並壓印簽名，最後導出新 PDF Blob
  */
 export async function exportPdf({
-  originalFile,
+  filesMap,
   pages,
   signatures,
   savedSignatures,
 }: ExportPdfParams): Promise<Blob> {
-  const originalBytes = await originalFile.arrayBuffer();
-  
-  // 1. 載入原始 PDF
-  const srcDoc = await PDFDocument.load(originalBytes);
+  // 1. 載入所有來源 PDF 文件並進行快取
+  const loadedDocsMap: Record<string, PDFDocument> = {};
+  for (const [fileId, fileObj] of Object.entries(filesMap)) {
+    const bytes = await fileObj.arrayBuffer();
+    loadedDocsMap[fileId] = await PDFDocument.load(bytes);
+  }
   
   // 2. 建立全新的 PDF 文件
   const newDoc = await PDFDocument.create();
   
-  // 3. 過濾掉標記為被刪除的頁面，只拷貝需要的頁面
+  // 3. 過濾掉標記為被刪除的頁面
   const activePages = pages.filter(p => !p.isDeleted);
-  const activeIndices = activePages.map(p => p.pageIndex);
   
-  if (activeIndices.length === 0) {
+  if (activePages.length === 0) {
     throw new Error("無法導出空的文件，請至少保留一頁。");
   }
   
-  // 拷貝指定頁面到新 PDF
-  const copiedPages = await newDoc.copyPages(srcDoc, activeIndices);
-  
-  // 建立簽名圖片的嵌入快取，避免重複嵌入相同的圖片
+  // 建立簽名圖片的嵌入快取
   const embeddedSignaturesMap: Record<string, any> = {};
   
   // 4. 逐頁進行編輯套用 (旋轉、裁切、電子簽章)
   for (let i = 0; i < activePages.length; i++) {
-    const sourcePageConfig = activePages[i];
-    const newPage = copiedPages[i];
+    const pageConfig = activePages[i];
+    const srcDoc = loadedDocsMap[pageConfig.fileId];
+    if (!srcDoc) continue;
     
-    // 取得拷貝後頁面的實際物理尺寸
-    const { width: pageW, height: pageH } = newPage.getSize();
+    // 拷貝對應檔案的對應頁面 (拷貝單個頁面)
+    const [copiedPage] = await newDoc.copyPages(srcDoc, [pageConfig.sourcePageIndex]);
+    const { width: pageW, height: pageH } = copiedPage.getSize();
     
     // A. 套用頁面旋轉
-    if (sourcePageConfig.rotation !== 0) {
-      // 這裡採用絕對角度，而不是相對累加角度
-      newPage.setRotation(degrees(sourcePageConfig.rotation));
+    if (pageConfig.rotation !== 0) {
+      copiedPage.setRotation(degrees(pageConfig.rotation));
     }
     
     // B. 套用頁面裁切 (CropBox)
-    if (sourcePageConfig.cropBox) {
-      const { x: rx, y: ry, width: rw, height: rh } = sourcePageConfig.cropBox;
+    if (pageConfig.cropBox) {
+      const { x: rx, y: ry, width: rw, height: rh } = pageConfig.cropBox;
       // 換算成 PDF 內部 points 座標 (注意 PDF 的原點是在左下角，而 Canvas 在左上角)
       const cropX = rx * pageW;
       const cropW = rw * pageW;
@@ -162,12 +173,11 @@ export async function exportPdf({
       // PDF y_pdf = H_pdf - (y_canvas + h_canvas)
       const cropY = pageH - (ry + rh) * pageH;
       
-      newPage.setCropBox(cropX, cropY, cropW, cropH);
+      copiedPage.setCropBox(cropX, cropY, cropW, cropH);
     }
     
-    // C. 壓印電子簽章 (Flatten)
-    // 找出所有放置在當前頁面的簽名 (注意：放置的 pageIndex 是原始頁面 index)
-    const pageSignatures = signatures.filter(sig => sig.pageIndex === sourcePageConfig.pageIndex);
+    // C. 壓印電子簽章 (Flatten) - 根據頁面的唯一 ID `id` 進行簽名匹配
+    const pageSignatures = signatures.filter(sig => sig.pageId === pageConfig.id);
     
     for (const sig of pageSignatures) {
       const savedSig = savedSignatures.find(s => s.id === sig.signatureImageId);
@@ -193,7 +203,7 @@ export async function exportPdf({
       // PDF y_pdf = H_pdf - (y_canvas + h_canvas)
       const sigY = pageH - (sig.y + sig.height) * pageH;
       
-      newPage.drawImage(embeddedImg, {
+      copiedPage.drawImage(embeddedImg, {
         x: sigX,
         y: sigY,
         width: sigW,
@@ -202,7 +212,7 @@ export async function exportPdf({
     }
     
     // 將編輯後的頁面加入新文件
-    newDoc.addPage(newPage);
+    newDoc.addPage(copiedPage);
   }
   
   // 5. 輸出 PDF 位元組並打包為 Blob

@@ -21,6 +21,7 @@ export function SignatureModal({
 }: SignatureModalProps) {
   const [activeTab, setActiveTab] = useState<"draw" | "upload" | "list">("draw");
   const [penColor, setPenColor] = useState<"black" | "blue" | "red">("black");
+  const [penWidth, setPenWidth] = useState<number>(4); // 新增筆觸粗細狀態 (預設 4px 中)
   
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -35,7 +36,7 @@ export function SignatureModal({
     }
   };
 
-  // 初始化畫板
+  // 1. 初始化畫布尺寸 (僅在切換到 draw 分頁時執行一次，防止顏色/粗細變更時清空畫布)
   useEffect(() => {
     if (activeTab !== "draw") return;
     const canvas = canvasRef.current;
@@ -44,21 +45,27 @@ export function SignatureModal({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // 清空並設定基本繪圖樣式
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.lineWidth = 3.5;
-    ctx.strokeStyle = getHexColor(penColor);
-
-    // 由於可能存在 high-DPI 螢幕模糊，可以重設 canvas 的 buffer 尺寸
     const rect = canvas.getBoundingClientRect();
     canvas.width = rect.width * 2;
     canvas.height = rect.height * 2;
     ctx.scale(2, 2);
     
-    // 清除畫布背景為完全透明
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
     ctx.clearRect(0, 0, rect.width, rect.height);
-  }, [activeTab, penColor]);
+  }, [activeTab]);
+
+  // 2. 當筆劃屬性 (顏色/粗細) 變更時，動態更新 context 屬性，不重新設定 canvas 寬高
+  useEffect(() => {
+    if (activeTab !== "draw") return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    ctx.strokeStyle = getHexColor(penColor);
+    ctx.lineWidth = penWidth;
+  }, [activeTab, penColor, penWidth]);
 
   // 手寫繪製輔助函式
   const getCoordinates = (e: React.MouseEvent | React.TouchEvent | MouseEvent | TouchEvent, canvas: HTMLCanvasElement) => {
@@ -80,6 +87,13 @@ export function SignatureModal({
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      // 繪圖開始時，確保套用最新的顏色和粗細
+      ctx.strokeStyle = getHexColor(penColor);
+      ctx.lineWidth = penWidth;
+    }
 
     const pos = getCoordinates(e.nativeEvent, canvas);
     if (!pos) return;
@@ -115,26 +129,17 @@ export function SignatureModal({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     const rect = canvas.getBoundingClientRect();
-    ctx.clearRect(0, 0, rect.width, rect.height);
+    // 考慮到 scaled context，這裡直接用 clearRect 清除雙倍 buffer
+    ctx.clearRect(0, 0, rect.width * 2, rect.height * 2);
   };
 
   const saveDrawSignature = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    // 檢查 Canvas 是否為空
-    const tempCanvas = document.createElement("canvas");
-    tempCanvas.width = canvas.width;
-    tempCanvas.height = canvas.height;
-    const tempCtx = tempCanvas.getContext("2d");
-    if (tempCtx) {
-      // 複製目前的畫布
-      tempCtx.drawImage(canvas, 0, 0);
-    }
-    
     const dataUrl = canvas.toDataURL("image/png");
     
-    // 檢查是否有畫任何東西 (簡單的像素檢查，如果全部透明則視為空)
+    // 檢查是否有畫任何東西 (像素檢查)
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
@@ -253,32 +258,62 @@ export function SignatureModal({
           {/* TAB 1: 手寫畫板 */}
           {activeTab === "draw" && (
             <div className="flex flex-col h-full gap-4">
-              <div className="flex items-center justify-between">
-                {/* 筆刷顏色選擇 */}
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">筆跡顏色：</span>
-                  {(["black", "blue", "red"] as const).map(color => {
-                    let dotColor = "";
-                    switch (color) {
-                      case "black": dotColor = "bg-slate-900 border-slate-400"; break;
-                      case "blue": dotColor = "bg-blue-600 border-blue-400"; break;
-                      case "red": dotColor = "bg-red-600 border-red-400"; break;
-                    }
-                    return (
-                      <button
-                        key={color}
-                        onClick={() => setPenColor(color)}
-                        className={`h-6 w-6 rounded-full border-2 transition-all flex items-center justify-center
-                          ${penColor === color 
-                            ? "scale-110 ring-2 ring-indigo-500/40 ring-offset-1 dark:ring-offset-slate-900" 
-                            : "opacity-60 hover:opacity-100"
-                          }
-                        `}
-                      >
-                        <span className={`h-3 w-3 rounded-full ${dotColor}`} />
-                      </button>
-                    );
-                  })}
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                {/* 筆刷顏色與粗細調整列 */}
+                <div className="flex items-center gap-4">
+                  {/* 顏色 */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">顏色：</span>
+                    {(["black", "blue", "red"] as const).map(color => {
+                      let dotColor = "";
+                      switch (color) {
+                        case "black": dotColor = "bg-slate-900 border-slate-400"; break;
+                        case "blue": dotColor = "bg-blue-600 border-blue-400"; break;
+                        case "red": dotColor = "bg-red-600 border-red-400"; break;
+                      }
+                      return (
+                        <button
+                          key={color}
+                          onClick={() => setPenColor(color)}
+                          className={`h-6 w-6 rounded-full border-2 transition-all flex items-center justify-center
+                            ${penColor === color 
+                              ? "scale-110 ring-2 ring-indigo-500/40 ring-offset-1 dark:ring-offset-slate-900" 
+                              : "opacity-60 hover:opacity-100"
+                            }
+                          `}
+                        >
+                          <span className={`h-3 w-3 rounded-full ${dotColor}`} />
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* 粗細 */}
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">筆觸：</span>
+                    {([2, 4, 6] as const).map(widthVal => {
+                      let label = "";
+                      switch (widthVal) {
+                        case 2: label = "細"; break;
+                        case 4: label = "中"; break;
+                        case 6: label = "粗"; break;
+                      }
+                      return (
+                        <button
+                          key={widthVal}
+                          onClick={() => setPenWidth(widthVal)}
+                          className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all border
+                            ${penWidth === widthVal
+                              ? "bg-indigo-500 border-indigo-500 text-white"
+                              : "border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-850"
+                            }
+                          `}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
                 
                 <button
@@ -293,7 +328,7 @@ export function SignatureModal({
               <div className="flex-1 min-h-[220px] rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 overflow-hidden shadow-inner relative">
                 <canvas
                   ref={canvasRef}
-                  className="absolute inset-0 w-full h-full cursor-crosshair touch-none"
+                  className="absolute inset-0 w-full h-full cursor-crosshair touch-none bg-transparent"
                   onMouseDown={startDrawing}
                   onMouseMove={draw}
                   onMouseUp={stopDrawing}

@@ -8,6 +8,7 @@ import { Dropzone } from "@/components/pdf-suite/dropzone";
 import { ThumbnailGrid } from "@/components/pdf-suite/thumbnail-grid";
 import { CropModal } from "@/components/pdf-suite/crop-modal";
 import { SignatureModal } from "@/components/pdf-suite/signature-modal";
+import { InsertModal } from "@/components/pdf-suite/insert-modal";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 import { 
   PdfPageInfo, 
@@ -24,6 +25,8 @@ interface WebShareNavigator {
 
 export default function MainPage() {
   const [file, setFile] = useState<File | null>(null);
+  const [filesMap, setFilesMap] = useState<Record<string, File>>({});
+  const [isInsertModalOpen, setIsInsertModalOpen] = useState(false);
   const [pages, setPages] = useState<PdfPageInfo[]>([]);
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
   const [placedSignatures, setPlacedSignatures] = useState<PlacedSignature[]>([]);
@@ -89,12 +92,51 @@ export default function MainPage() {
     
     try {
       setFile(selectedFile);
-      const loadedPages = await loadPdfPages(selectedFile);
+      const fileId = "file-main";
+      setFilesMap({ [fileId]: selectedFile });
+      const loadedPages = await loadPdfPages(selectedFile, fileId);
       setPages(loadedPages);
     } catch (error) {
       console.error("Error loading PDF file", error);
       alert("無法讀取或解析 PDF 文件，請確保該檔案為標準且未受密碼保護的 PDF。\n詳細錯誤資訊：" + (error instanceof Error ? error.message : String(error)));
       setFile(null);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // 處理 PDF 頁面插入邏輯
+  const handleConfirmInsert = async (
+    insertedFile: File,
+    selectedIndices: number[],
+    insertAfterPosition: number
+  ) => {
+    setIsLoading(true);
+    try {
+      const insertFileId = `file-insert-${Date.now()}`;
+      // 1. 將新文件加入 filesMap 快取中
+      setFilesMap(prev => ({ ...prev, [insertFileId]: insertedFile }));
+      
+      // 2. 加載新選定頁面的預覽與規格
+      const newPages = await loadPdfPages(insertedFile, insertFileId, selectedIndices);
+      
+      // 3. 在指定頁碼位置插入新頁面，並重新排序 index 與 pageNumber
+      setPages(prevPages => {
+        const updated = [...prevPages];
+        updated.splice(insertAfterPosition, 0, ...newPages);
+        return updated.map((p, idx) => ({
+          ...p,
+          pageIndex: idx,
+          pageNumber: idx + 1,
+        }));
+      });
+
+      // 清除選取與導出快取
+      setSelectedIndices(new Set());
+      setExportedBlob(null);
+    } catch (error) {
+      console.error("Error inserting pages", error);
+      alert("無法插入 PDF 頁面，詳細原因：" + (error instanceof Error ? error.message : String(error)));
     } finally {
       setIsLoading(false);
     }
@@ -163,8 +205,9 @@ export default function MainPage() {
     });
     setPages(updatedPages);
     
-    // 從被刪除的頁面中移出所有已放置的簽名
-    const filteredSignatures = placedSignatures.filter(sig => !selectedIndices.has(sig.pageIndex));
+    // 從被刪除的頁面中移出所有已放置的簽名 (透過 pageId 進行對齊過濾)
+    const deletedPageIds = new Set(pages.filter(p => selectedIndices.has(p.pageIndex)).map(p => p.id));
+    const filteredSignatures = placedSignatures.filter(sig => !deletedPageIds.has(sig.pageId));
     setPlacedSignatures(filteredSignatures);
     
     setSelectedIndices(new Set());
@@ -181,7 +224,10 @@ export default function MainPage() {
     setPages(updatedPages);
     
     // 移出該頁面已放置的簽名
-    const filteredSignatures = placedSignatures.filter(sig => sig.pageIndex !== pageIndex);
+    const targetPage = pages.find(p => p.pageIndex === pageIndex);
+    const filteredSignatures = targetPage 
+      ? placedSignatures.filter(sig => sig.pageId !== targetPage.id) 
+      : placedSignatures;
     setPlacedSignatures(filteredSignatures);
     
     // 從選取集合中移出
@@ -248,7 +294,7 @@ export default function MainPage() {
     
     try {
       const blob = await exportPdf({
-        originalFile: file,
+        filesMap,
         pages,
         signatures: placedSignatures,
         savedSignatures,
@@ -307,6 +353,7 @@ export default function MainPage() {
   const handleReset = () => {
     if (confirm("您確定要清除目前的文件嗎？所有未導出的修改將會遺失。")) {
       setFile(null);
+      setFilesMap({});
       setPages([]);
       setSelectedIndices(new Set());
       setPlacedSignatures([]);
@@ -330,6 +377,7 @@ export default function MainPage() {
         onRotateSelected={handleRotateSelected}
         onDeleteSelected={handleDeleteSelected}
         onOpenSignatureModal={() => setIsSignatureModalOpen(true)}
+        onOpenInsertModal={() => setIsInsertModalOpen(true)}
         onExport={handleExport}
         onShare={handleShare}
         onReset={handleReset}
@@ -429,6 +477,15 @@ export default function MainPage() {
           onSelectActiveSignature={setActiveSignatureId}
           activeSignatureId={activeSignatureId}
           onClose={() => setIsSignatureModalOpen(false)}
+        />
+      )}
+
+      {/* 插入 PDF 彈窗 */}
+      {isInsertModalOpen && (
+        <InsertModal
+          mainPdfTotalPages={pages.filter(p => !p.isDeleted).length}
+          onClose={() => setIsInsertModalOpen(false)}
+          onConfirmInsert={handleConfirmInsert}
         />
       )}
 
