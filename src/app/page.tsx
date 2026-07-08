@@ -17,6 +17,11 @@ import {
   exportPdf 
 } from "@/lib/pdf-utils";
 
+interface WebShareNavigator {
+  share?: (data: ShareData) => Promise<void>;
+  canShare?: (data: ShareData) => boolean;
+}
+
 export default function MainPage() {
   const [file, setFile] = useState<File | null>(null);
   const [pages, setPages] = useState<PdfPageInfo[]>([]);
@@ -57,7 +62,8 @@ export default function MainPage() {
     }
 
     // 檢查 Web Share API 支援度
-    if (typeof navigator !== "undefined" && navigator.share && navigator.canShare) {
+    const nav = navigator as unknown as WebShareNavigator;
+    if (typeof navigator !== "undefined" && nav.share && nav.canShare) {
       setCanShare(true);
     }
   }, []);
@@ -283,8 +289,9 @@ export default function MainPage() {
         type: "application/pdf",
       });
 
-      if (navigator.canShare && navigator.canShare({ files: [fileToShare] })) {
-        await navigator.share({
+      const nav = navigator as unknown as WebShareNavigator;
+      if (nav.canShare && nav.canShare({ files: [fileToShare] }) && nav.share) {
+        await nav.share({
           files: [fileToShare],
           title: "分享您的 PDF 文件",
           text: "這是使用 Local PDF Suite 編輯並完成電子簽署的文件。",
