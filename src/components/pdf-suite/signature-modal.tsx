@@ -737,12 +737,12 @@ export function SignatureModal({
               </div>
 
               {/* 右側預覽面板 */}
-              <div className="w-full md:w-[260px] flex flex-col items-center justify-between border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/30 rounded-2xl p-5 shadow-inner">
-                <div className="w-full flex-1 flex flex-col items-center justify-center gap-2">
+              <div className="w-full md:w-[260px] flex flex-col items-center justify-between border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/30 rounded-2xl p-3 md:p-5 shadow-inner">
+                <div className="w-full flex-1 flex flex-col items-center justify-center gap-1.5">
                   <span className="text-[10px] font-bold text-slate-400">印章效果預覽</span>
                   
                   {/* 預覽 Canvas 容器 */}
-                  <div className="w-full flex items-center justify-center p-3 border border-slate-100 dark:border-slate-850 rounded-xl bg-white dark:bg-slate-900 shadow-sm min-h-[160px]">
+                  <div className="w-full flex items-center justify-center p-2.5 border border-slate-100 dark:border-slate-850 rounded-xl bg-white dark:bg-slate-900 shadow-sm min-h-[95px] md:min-h-[160px]">
                     <canvas
                       ref={stampCanvasRef}
                       className="max-w-full object-contain pointer-events-none select-none bg-transparent"
@@ -750,7 +750,7 @@ export function SignatureModal({
                   </div>
                 </div>
 
-                <div className="flex w-full gap-2 mt-5">
+                <div className="flex w-full gap-2 mt-3 md:mt-5">
                   <button
                     type="button"
                     onClick={onClose}
