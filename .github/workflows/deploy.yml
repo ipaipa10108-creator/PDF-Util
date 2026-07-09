@@ -45,6 +45,8 @@ jobs:
 
       - name: Static HTML export with Next.js
         run: pnpm build
+        env:
+          BASE_PATH: /PDF-Util
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
