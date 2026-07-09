@@ -9,6 +9,7 @@ import { ThumbnailGrid } from "@/components/pdf-suite/thumbnail-grid";
 import { CropModal } from "@/components/pdf-suite/crop-modal";
 import { SignatureModal } from "@/components/pdf-suite/signature-modal";
 import { InsertModal } from "@/components/pdf-suite/insert-modal";
+import { CopyStampModal } from "@/components/pdf-suite/copy-stamp-modal";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 import { 
   PdfPageInfo, 
@@ -33,6 +34,41 @@ export default function MainPage() {
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
   const [placedSignatures, setPlacedSignatures] = useState<PlacedSignature[]>([]);
   const [activeSignatureId, setActiveSignatureId] = useState<string | null>(null);
+  const [signatureModalDefaultTab, setSignatureModalDefaultTab] = useState<"draw" | "upload" | "list" | "stamp">("draw");
+  const [copySourceSignatureId, setCopySourceSignatureId] = useState<string | null>(null);
+  
+  // Undo/Redo 歷史狀態與堆疊
+  interface HistoryState {
+    pages: PdfPageInfo[];
+    placedSignatures: PlacedSignature[];
+  }
+  const [undoStack, setUndoStack] = useState<HistoryState[]>([]);
+  const [redoStack, setRedoStack] = useState<HistoryState[]>([]);
+
+  const recordHistory = () => {
+    setUndoStack(prev => [...prev.slice(-29), { pages, placedSignatures }]);
+    setRedoStack([]);
+  };
+
+  const handleUndo = () => {
+    if (undoStack.length === 0) return;
+    const previous = undoStack[undoStack.length - 1];
+    setUndoStack(prev => prev.slice(0, -1));
+    setRedoStack(prev => [...prev, { pages, placedSignatures }]);
+    setPages(previous.pages);
+    setPlacedSignatures(previous.placedSignatures);
+    setExportedBlob(null);
+  };
+
+  const handleRedo = () => {
+    if (redoStack.length === 0) return;
+    const next = redoStack[redoStack.length - 1];
+    setRedoStack(prev => prev.slice(0, -1));
+    setUndoStack(prev => [...prev, { pages, placedSignatures }]);
+    setPages(next.pages);
+    setPlacedSignatures(next.placedSignatures);
+    setExportedBlob(null);
+  };
   
   // 使用本機儲存快取電子簽章
   const [savedSignatures, setSavedSignatures] = useLocalStorage<SavedSignature[]>(
@@ -139,6 +175,8 @@ export default function MainPage() {
     setExportedBlob(null);
     setPlacedSignatures([]);
     setSelectedIndices(new Set());
+    setUndoStack([]);
+    setRedoStack([]);
     
     try {
       setFile(selectedFile);
@@ -162,6 +200,7 @@ export default function MainPage() {
     insertAfterPosition: number
   ) => {
     setIsLoading(true);
+    recordHistory();
     try {
       const insertFileId = `file-insert-${Date.now()}`;
       // 1. 將新文件加入 filesMap 快取中
@@ -194,6 +233,7 @@ export default function MainPage() {
 
   // 處理拖曳頁面重排
   const handleReorderPages = (draggedIndex: number, hoverIndex: number) => {
+    recordHistory();
     setPages(prevPages => {
       const updated = [...prevPages];
       const [draggedPage] = updated.splice(draggedIndex, 1);
@@ -210,6 +250,7 @@ export default function MainPage() {
 
   // 處理指定移動位置
   const handleMovePagePosition = (fromIndex: number, toIndexAfter: number) => {
+    recordHistory();
     setPages(prevPages => {
       const updated = [...prevPages];
       const [movedPage] = updated.splice(fromIndex, 1);
@@ -290,6 +331,7 @@ export default function MainPage() {
 
   // 頁面旋轉與刪除
   const handleRotateSelected = (degrees: number) => {
+    recordHistory();
     const updatedPages = pages.map(page => {
       if (selectedIndices.has(page.pageIndex)) {
         return { ...page, rotation: (page.rotation + degrees) % 360 };
@@ -302,6 +344,7 @@ export default function MainPage() {
   };
 
   const handleRotateSinglePage = (pageIndex: number, degrees: number) => {
+    recordHistory();
     const updatedPages = pages.map(page => {
       if (page.pageIndex === pageIndex) {
         return { ...page, rotation: (page.rotation + degrees) % 360 };
@@ -313,6 +356,7 @@ export default function MainPage() {
   };
 
   const handleDeleteSelected = () => {
+    recordHistory();
     const updatedPages = pages.map(page => {
       if (selectedIndices.has(page.pageIndex)) {
         return { ...page, isDeleted: true };
@@ -331,6 +375,7 @@ export default function MainPage() {
   };
 
   const handleDeleteSinglePage = (pageIndex: number) => {
+    recordHistory();
     const updatedPages = pages.map(page => {
       if (page.pageIndex === pageIndex) {
         return { ...page, isDeleted: true };
@@ -355,6 +400,7 @@ export default function MainPage() {
   };
 
   const handleRestorePage = (pageIndex: number) => {
+    recordHistory();
     const updatedPages = pages.map(page => {
       if (page.pageIndex === pageIndex) {
         return { ...page, isDeleted: false };
@@ -371,6 +417,7 @@ export default function MainPage() {
     cropBox: { x: number; y: number; width: number; height: number } | null,
     applyToAll: boolean
   ) => {
+    recordHistory();
     const updatedPages = pages.map(page => {
       if (applyToAll || page.pageIndex === pageIndex) {
         return { ...page, cropBox };
@@ -392,6 +439,7 @@ export default function MainPage() {
   };
 
   const handleAddPlacedSignature = (sig: PlacedSignature) => {
+    recordHistory();
     setPlacedSignatures([...placedSignatures, sig]);
     setActiveSignatureId(null); // 放置後取消啟用，方便使用者選取或拖曳
     setExportedBlob(null);
@@ -399,6 +447,48 @@ export default function MainPage() {
 
   const handleUpdateSignatures = (updatedSigs: PlacedSignature[]) => {
     setPlacedSignatures(updatedSigs);
+    setExportedBlob(null);
+  };
+
+  const handleCopyToAllPages = (sigId: string) => {
+    const sourceSig = placedSignatures.find(s => s.id === sigId);
+    if (!sourceSig) return;
+
+    recordHistory();
+    const targetPages = pages.filter(p => !p.isDeleted && p.id !== sourceSig.pageId);
+    
+    const newCopies = targetPages.map(page => ({
+      id: `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+      pageId: page.id,
+      signatureImageId: sourceSig.signatureImageId,
+      x: sourceSig.x,
+      y: sourceSig.y,
+      width: sourceSig.width,
+      height: sourceSig.height,
+    }));
+
+    setPlacedSignatures([...placedSignatures, ...newCopies]);
+    setExportedBlob(null);
+  };
+
+  const handleCopyToPages = (sigId: string, targetPageIds: string[]) => {
+    const sourceSig = placedSignatures.find(s => s.id === sigId);
+    if (!sourceSig) return;
+
+    recordHistory();
+    const validTargetPageIds = targetPageIds.filter(id => id !== sourceSig.pageId);
+
+    const newCopies = validTargetPageIds.map(pageId => ({
+      id: `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+      pageId: pageId,
+      signatureImageId: sourceSig.signatureImageId,
+      x: sourceSig.x,
+      y: sourceSig.y,
+      width: sourceSig.width,
+      height: sourceSig.height,
+    }));
+
+    setPlacedSignatures([...placedSignatures, ...newCopies]);
     setExportedBlob(null);
   };
 
@@ -540,7 +630,14 @@ export default function MainPage() {
         onSelectNone={handleSelectNone}
         onRotateSelected={handleRotateSelected}
         onDeleteSelected={handleDeleteSelected}
-        onOpenSignatureModal={() => setIsSignatureModalOpen(true)}
+        onOpenSignatureModal={() => {
+          setSignatureModalDefaultTab("draw");
+          setIsSignatureModalOpen(true);
+        }}
+        onOpenStampModal={() => {
+          setSignatureModalDefaultTab("stamp");
+          setIsSignatureModalOpen(true);
+        }}
         onOpenInsertModal={() => setIsInsertModalOpen(true)}
         onExport={handleExport}
         onShare={handleShare}
@@ -549,6 +646,10 @@ export default function MainPage() {
         canShare={canShare}
         isDarkMode={isDarkMode}
         onToggleDarkMode={handleToggleDarkMode}
+        canUndo={undoStack.length > 0}
+        canRedo={redoStack.length > 0}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
       />
 
       {/* 主要內容區 */}
@@ -564,7 +665,7 @@ export default function MainPage() {
             <div className="bg-slate-100/50 dark:bg-slate-900/30 border-b border-slate-200/50 dark:border-slate-800/50 px-4 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400">
               {activeSignatureId ? (
                 <div className="flex items-center justify-center gap-1.5 text-indigo-600 dark:text-indigo-400 animate-pulse">
-                  <span>已選取簽章！請點擊下方的任何一頁縮圖，將其放置在您想要的位置。</span>
+                  <span>已選取貼圖！請點擊下方的任何一頁縮圖，將其放置在您想要的位置。</span>
                   <button 
                     onClick={() => setActiveSignatureId(null)}
                     className="underline text-[10px] ml-1 opacity-80 hover:opacity-100"
@@ -575,7 +676,7 @@ export default function MainPage() {
               ) : (
                 <span className="flex items-center justify-center gap-1">
                   <LayoutGrid className="h-3.5 w-3.5" />
-                  <span>您可以在縮圖上勾選以進行批次旋轉或刪除，也可以點擊每一頁下方的「裁切」或頂部的「簽章」按鈕。</span>
+                  <span>您可以在縮圖上勾選以進行批次旋轉或刪除，也可以點擊每一頁下方的「裁切」或頂部的「簽章」/「圖章」按鈕。</span>
                 </span>
               )}
             </div>
@@ -597,6 +698,9 @@ export default function MainPage() {
                 onAddPlacedSignature={handleAddPlacedSignature}
                 onReorderPages={handleReorderPages}
                 onMovePagePosition={handleMovePagePosition}
+                onCopyToAllPages={handleCopyToAllPages}
+                onOpenCopyModal={(sigId) => setCopySourceSignatureId(sigId)}
+                onRecordHistory={recordHistory}
               />
             </div>
             
@@ -643,6 +747,20 @@ export default function MainPage() {
           onSelectActiveSignature={setActiveSignatureId}
           activeSignatureId={activeSignatureId}
           onClose={() => setIsSignatureModalOpen(false)}
+          defaultTab={signatureModalDefaultTab}
+        />
+      )}
+
+      {/* 複製貼圖選頁彈窗 */}
+      {copySourceSignatureId !== null && (
+        <CopyStampModal
+          pages={pages}
+          sourcePageId={placedSignatures.find(s => s.id === copySourceSignatureId)?.pageId || ""}
+          onClose={() => setCopySourceSignatureId(null)}
+          onConfirmCopy={(targetPageIds) => {
+            handleCopyToPages(copySourceSignatureId, targetPageIds);
+            setCopySourceSignatureId(null);
+          }}
         />
       )}
 

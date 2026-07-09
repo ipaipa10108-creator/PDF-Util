@@ -1,5 +1,5 @@
 import React, { useRef } from "react";
-import { X } from "lucide-react";
+import { X, Copy, Layers } from "lucide-react";
 import { PlacedSignature, SavedSignature } from "@/lib/pdf-utils";
 
 export interface SignatureLayerProps {
@@ -9,6 +9,9 @@ export interface SignatureLayerProps {
   onUpdateSignatures: (signatures: PlacedSignature[]) => void;
   containerWidth: number;
   containerHeight: number;
+  onCopyToAllPages: (sigId: string) => void;
+  onOpenCopyModal: (sigId: string) => void;
+  onRecordHistory: () => void;
 }
 
 export function SignatureLayer({
@@ -18,6 +21,9 @@ export function SignatureLayer({
   onUpdateSignatures,
   containerWidth,
   containerHeight,
+  onCopyToAllPages,
+  onOpenCopyModal,
+  onRecordHistory,
 }: SignatureLayerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   
@@ -35,6 +41,8 @@ export function SignatureLayer({
   ) => {
     e.preventDefault();
     e.stopPropagation();
+
+    onRecordHistory();
 
     const container = containerRef.current;
     if (!container) return;
@@ -83,6 +91,8 @@ export function SignatureLayer({
     sigH: number
   ) => {
     e.stopPropagation();
+
+    onRecordHistory();
 
     const container = containerRef.current;
     if (!container) return;
@@ -140,6 +150,8 @@ export function SignatureLayer({
     e.preventDefault();
     e.stopPropagation();
 
+    onRecordHistory();
+
     const container = containerRef.current;
     if (!container) return;
 
@@ -192,6 +204,8 @@ export function SignatureLayer({
   ) => {
     e.stopPropagation();
 
+    onRecordHistory();
+
     const container = containerRef.current;
     if (!container) return;
 
@@ -242,6 +256,7 @@ export function SignatureLayer({
   const handleDelete = (e: React.MouseEvent | React.TouchEvent, sigId: string) => {
     e.preventDefault();
     e.stopPropagation();
+    onRecordHistory();
     const filtered = placedSignatures.filter(sig => sig.id !== sigId);
     onUpdateSignatures(filtered);
   };
@@ -276,6 +291,42 @@ export function SignatureLayer({
               alt="Signature"
               className="w-full h-full object-contain pointer-events-none"
             />
+
+            {/* 左上角複製到全部頁面按鈕 */}
+            <button
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onCopyToAllPages(sig.id);
+              }}
+              onTouchStart={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onCopyToAllPages(sig.id);
+              }}
+              className="absolute -top-2.5 -left-2.5 flex h-5 w-5 items-center justify-center rounded-full bg-indigo-600 hover:bg-indigo-700 text-white shadow-md border border-white opacity-80 sm:opacity-0 group-hover/sig:opacity-100 transition-opacity"
+              title="全部張貼 (複製到所有其他頁面的相同位置)"
+            >
+              <Copy className="h-2.5 w-2.5" />
+            </button>
+
+            {/* 左上角複製到指定頁面按鈕 */}
+            <button
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onOpenCopyModal(sig.id);
+              }}
+              onTouchStart={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onOpenCopyModal(sig.id);
+              }}
+              className="absolute -top-2.5 left-3.5 flex h-5 w-5 items-center justify-center rounded-full bg-violet-600 hover:bg-violet-700 text-white shadow-md border border-white opacity-80 sm:opacity-0 group-hover/sig:opacity-100 transition-opacity"
+              title="指定頁面張貼..."
+            >
+              <Layers className="h-2.5 w-2.5" />
+            </button>
 
             {/* 右下角縮放手柄 */}
             <div

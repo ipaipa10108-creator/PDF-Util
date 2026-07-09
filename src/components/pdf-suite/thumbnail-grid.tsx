@@ -18,6 +18,9 @@ export interface ThumbnailGridProps {
   onAddPlacedSignature: (sig: PlacedSignature) => void;
   onReorderPages: (draggedIndex: number, hoverIndex: number) => void; // 拖曳重排
   onMovePagePosition: (fromIndex: number, toIndexAfter: number) => void; // 指定位置移動
+  onCopyToAllPages: (sigId: string) => void;
+  onOpenCopyModal: (sigId: string) => void;
+  onRecordHistory: () => void;
 }
 
 export function ThumbnailGrid({
@@ -35,6 +38,9 @@ export function ThumbnailGrid({
   onAddPlacedSignature,
   onReorderPages,
   onMovePagePosition,
+  onCopyToAllPages,
+  onOpenCopyModal,
+  onRecordHistory,
 }: ThumbnailGridProps) {
   
   const isPlacementMode = !!activeSignatureId;
@@ -192,6 +198,9 @@ export function ThumbnailGrid({
                     onUpdateSignatures={onUpdateSignatures}
                     containerWidth={0} // 傳入 0 讓 SignatureLayer 使用 absolute inset-0 滿版定位
                     containerHeight={0}
+                    onCopyToAllPages={onCopyToAllPages}
+                    onOpenCopyModal={onOpenCopyModal}
+                    onRecordHistory={onRecordHistory}
                   />
                 )}
 

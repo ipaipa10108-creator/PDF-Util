@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from "react";
-import { X, Trash2, Edit3, Image as ImageIcon, Check, ShieldAlert } from "lucide-react";
+import { X, Trash2, Edit3, Image as ImageIcon, Check, ShieldAlert, Bookmark } from "lucide-react";
 import { SavedSignature } from "@/lib/pdf-utils";
 
 export interface SignatureModalProps {
@@ -9,6 +9,7 @@ export interface SignatureModalProps {
   onSelectActiveSignature: (id: string | null) => void;
   activeSignatureId: string | null;
   onClose: () => void;
+  defaultTab?: "draw" | "upload" | "list" | "stamp";
 }
 
 export function SignatureModal({
@@ -18,11 +19,242 @@ export function SignatureModal({
   onSelectActiveSignature,
   activeSignatureId,
   onClose,
+  defaultTab = "draw",
 }: SignatureModalProps) {
-  const [activeTab, setActiveTab] = useState<"draw" | "upload" | "list">("draw");
+  const [activeTab, setActiveTab] = useState<"draw" | "upload" | "list" | "stamp">("draw");
+
+  useEffect(() => {
+    if (defaultTab) {
+      setActiveTab(defaultTab);
+    }
+  }, [defaultTab]);
   const [penColor, setPenColor] = useState<"black" | "blue" | "red">("black");
   const [penWidth, setPenWidth] = useState<number>(4); // 新增筆觸粗細狀態 (預設 4px 中)
   
+  // 快速圖章相關狀態
+  const [stampType, setStampType] = useState<"sample" | "applicant" | "insured" | "child" | "checkmark" | "warning">("sample");
+  const [checkmarkStyle, setCheckmarkStyle] = useState<"classic" | "boxed" | "circle_filled" | "bold">("classic");
+  const [stampBgColor, setStampBgColor] = useState<"transparent" | "red" | "blue" | "black" | "yellow">("transparent");
+  const [stampFgColor, setStampFgColor] = useState<"red" | "blue" | "black">("red");
+  
+  const stampCanvasRef = useRef<HTMLCanvasElement>(null);
+  
+  // 實時繪製圖章預覽
+  useEffect(() => {
+    if (activeTab !== "stamp") return;
+    const canvas = stampCanvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    // 清空 Canvas
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // 取得顏色
+    const getBgHex = (bg: typeof stampBgColor) => {
+      switch (bg) {
+        case "transparent": return "transparent";
+        case "red": return "#dc2626"; // Red-600
+        case "blue": return "#2563eb"; // Blue-600
+        case "black": return "#0f172a"; // Slate-900
+        case "yellow": return "#eab308"; // Yellow-500
+      }
+    };
+
+    const getFgHex = (fg: typeof stampFgColor, bg: typeof stampBgColor) => {
+      if (bg === "red" || bg === "blue" || bg === "black") {
+        return "#ffffff"; // 對比色為白色
+      }
+      if (bg === "yellow") {
+        return fg === "red" ? "#dc2626" : "#0f172a"; // 黃色背景下，紅或黑
+      }
+      // 透明底
+      switch (fg) {
+        case "red": return "#dc2626";
+        case "blue": return "#2563eb";
+        case "black": return "#0f172a";
+      }
+    };
+
+    const bgColor = getBgHex(stampBgColor);
+    const fgColor = getFgHex(stampFgColor, stampBgColor);
+
+    ctx.save();
+    
+    // 設定高解析度 (DPI)
+    let w = 300;
+    let h = 150;
+    if (stampType === "checkmark") {
+      w = 200;
+      h = 200;
+    } else if (stampType === "warning") {
+      w = 380;
+      h = 80;
+    } else if (stampType === "sample") {
+      w = 300;
+      h = 150;
+    } else {
+      // 簽名貼紙
+      w = 300;
+      h = 100;
+    }
+
+    canvas.width = w * 2;
+    canvas.height = h * 2;
+    ctx.scale(2, 2);
+
+    // 繪製背景
+    if (bgColor !== "transparent") {
+      ctx.fillStyle = bgColor;
+      ctx.beginPath();
+      ctx.roundRect(0, 0, w, h, 12);
+      ctx.fill();
+    }
+
+    ctx.strokeStyle = fgColor;
+    ctx.fillStyle = fgColor;
+
+    if (stampType === "sample") {
+      // 樣本 (雙線圓角矩形)
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.roundRect(8, 8, w - 16, h - 16, 10);
+      ctx.stroke();
+
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.roundRect(14, 14, w - 28, h - 28, 7);
+      ctx.stroke();
+
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.font = "bold 44px sans-serif";
+      ctx.fillText("樣本", w / 2, h / 2 - 12);
+
+      ctx.font = "bold 20px sans-serif";
+      ctx.fillText("SAMPLE", w / 2, h / 2 + 28);
+      
+    } else if (stampType === "warning") {
+      // 請勿列印使用本範例文件!
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.roundRect(6, 6, w - 12, h - 12, 8);
+      ctx.stroke();
+
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      
+      // 繪製 ⚠️
+      ctx.font = "24px sans-serif";
+      ctx.fillText("⚠️", 20, h / 2);
+
+      ctx.font = "bold 18px sans-serif";
+      ctx.fillText("請勿列印使用本範例文件!", 55, h / 2 + 1);
+
+    } else if (stampType === "checkmark") {
+      // 勾勾
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      
+      if (checkmarkStyle === "classic") {
+        ctx.lineWidth = 12;
+        ctx.beginPath();
+        ctx.moveTo(w * 0.2, h * 0.5);
+        ctx.lineTo(w * 0.45, h * 0.75);
+        ctx.lineTo(w * 0.85, h * 0.28);
+        ctx.stroke();
+      } else if (checkmarkStyle === "boxed") {
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.roundRect(w * 0.15, h * 0.15, w * 0.7, h * 0.7, 8);
+        ctx.stroke();
+
+        ctx.lineWidth = 8;
+        ctx.beginPath();
+        ctx.moveTo(w * 0.32, h * 0.5);
+        ctx.lineTo(w * 0.48, h * 0.68);
+        ctx.lineTo(w * 0.72, h * 0.32);
+        ctx.stroke();
+      } else if (checkmarkStyle === "circle_filled") {
+        ctx.fillStyle = fgColor;
+        ctx.beginPath();
+        ctx.arc(w / 2, h / 2, w * 0.38, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = (stampBgColor === "transparent") ? "#ffffff" : (bgColor === "transparent" ? "#ffffff" : bgColor);
+        ctx.lineWidth = 8;
+        ctx.beginPath();
+        ctx.moveTo(w * 0.35, h * 0.52);
+        ctx.lineTo(w * 0.48, h * 0.68);
+        ctx.lineTo(w * 0.68, h * 0.38);
+        ctx.stroke();
+      } else if (checkmarkStyle === "bold") {
+        ctx.lineWidth = 18;
+        ctx.beginPath();
+        ctx.moveTo(w * 0.18, h * 0.52);
+        ctx.lineTo(w * 0.45, h * 0.78);
+        ctx.lineTo(w * 0.85, h * 0.25);
+        ctx.stroke();
+      }
+    } else {
+      // 要保人、被保險人、小孩簽名處
+      let label = "";
+      if (stampType === "applicant") label = "要保人";
+      else if (stampType === "insured") label = "被保險人";
+      else if (stampType === "child") label = "小孩";
+
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.roundRect(5, 5, w - 10, h - 10, 8);
+      ctx.stroke();
+
+      // 分割線
+      ctx.beginPath();
+      ctx.moveTo(110, 5);
+      ctx.lineTo(110, h - 5);
+      ctx.stroke();
+
+      // 左側文字
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.font = "bold 20px sans-serif";
+      ctx.fillText(label, 58, h / 2);
+
+      // 右側簽名底線
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(125, h / 2 + 10);
+      ctx.lineTo(w - 20, h / 2 + 10);
+      ctx.stroke();
+
+      ctx.font = "bold 11px sans-serif";
+      // 稍微調淡字體顏色
+      ctx.fillStyle = fgColor === "#0f172a" ? "#64748b" : fgColor;
+      ctx.fillText("✍️ 簽名處", 200, h / 2 + 26);
+    }
+
+    ctx.restore();
+  }, [activeTab, stampType, checkmarkStyle, stampBgColor, stampFgColor]);
+
+  const saveStampSignature = () => {
+    const canvas = stampCanvasRef.current;
+    if (!canvas) return;
+
+    const dataUrl = canvas.toDataURL("image/png");
+
+    const newSig: SavedSignature = {
+      id: `sig-stamp-${Date.now()}`,
+      type: "image",
+      dataUrl,
+      createdAt: Date.now(),
+    };
+
+    onAddSignature(newSig);
+    onSelectActiveSignature(newSig.id);
+    onClose();
+  };
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const lastPos = useRef({ x: 0, y: 0 });
@@ -235,6 +467,19 @@ export function SignatureModal({
           </button>
           
           <button
+            onClick={() => setActiveTab("stamp")}
+            className={`flex items-center gap-1.5 border-b-2 px-4 py-3 text-xs font-bold transition-all
+              ${activeTab === "stamp" 
+                ? "border-indigo-500 text-indigo-600 dark:text-indigo-400" 
+                : "border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+              }
+            `}
+          >
+            <Bookmark className="h-4 w-4" />
+            快速圖章
+          </button>
+          
+          <button
             onClick={() => setActiveTab("list")}
             className={`flex items-center gap-1.5 border-b-2 px-4 py-3 text-xs font-bold transition-all relative
               ${activeTab === "list" 
@@ -352,6 +597,175 @@ export function SignatureModal({
                 >
                   確認並使用
                 </button>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 1.5: 快速圖章 */}
+          {activeTab === "stamp" && (
+            <div className="flex flex-col md:flex-row gap-6 h-full">
+              {/* 左側控制面板 */}
+              <div className="flex-1 space-y-4 overflow-y-auto pr-1">
+                {/* 1. 圖章類型 */}
+                <div className="space-y-2">
+                  <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block">
+                    1. 選擇圖章款式
+                  </label>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {([
+                      { id: "sample", label: "樣本(Sample)" },
+                      { id: "applicant", label: "要保人(簽名)" },
+                      { id: "insured", label: "被保險人(簽名)" },
+                      { id: "child", label: "小孩(簽名)" },
+                      { id: "checkmark", label: "勾勾款式" },
+                      { id: "warning", label: "請勿列印範例" },
+                    ] as const).map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => setStampType(t.id)}
+                        className={`px-3 py-2 rounded-lg text-xs font-bold transition-all border text-left flex flex-col justify-between h-[52px]
+                          ${stampType === t.id
+                            ? "bg-indigo-500 border-indigo-500 text-white shadow-sm"
+                            : "border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-850"
+                          }
+                        `}
+                      >
+                        <span className="opacity-70 text-[9px]">款式</span>
+                        <span className="truncate w-full">{t.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 2. 打勾樣式 (僅在選取勾勾時顯示) */}
+                {stampType === "checkmark" && (
+                  <div className="space-y-2 border-t border-slate-100 dark:border-slate-800/80 pt-3 animate-fade-in">
+                    <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block">
+                      1.5 選擇打勾樣式
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {([
+                        { id: "classic", label: "經典打勾 (✓)" },
+                        { id: "boxed", label: "帶框打勾 (☑)" },
+                        { id: "circle_filled", label: "圓圈打勾 (🟢)" },
+                        { id: "bold", label: "手寫粗勾 (✔️)" },
+                      ] as const).map((style) => (
+                        <button
+                          key={style.id}
+                          type="button"
+                          onClick={() => setCheckmarkStyle(style.id)}
+                          className={`px-3 py-2 rounded-lg text-xs font-bold transition-all border
+                            ${checkmarkStyle === style.id
+                              ? "bg-indigo-500/10 border-indigo-500 text-indigo-600 dark:text-indigo-400"
+                              : "border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-850"
+                            }
+                          `}
+                        >
+                          {style.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 3. 章底圖顏色 */}
+                <div className="space-y-2 border-t border-slate-100 dark:border-slate-800/80 pt-3">
+                  <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block">
+                    2. 設定章底圖顏色
+                  </label>
+                  <div className="flex flex-wrap items-center gap-3">
+                    {([
+                      { id: "transparent", label: "透明", colorClass: "bg-transparent border-dashed border-slate-400" },
+                      { id: "red", label: "紅色", colorClass: "bg-red-600 border-red-500" },
+                      { id: "blue", label: "藍色", colorClass: "bg-blue-600 border-blue-500" },
+                      { id: "black", label: "黑色", colorClass: "bg-slate-900 border-slate-800" },
+                      { id: "yellow", label: "黃色", colorClass: "bg-yellow-400 border-yellow-300" },
+                    ] as const).map((bg) => (
+                      <button
+                        key={bg.id}
+                        type="button"
+                        onClick={() => setStampBgColor(bg.id)}
+                        className={`h-8 px-3 rounded-full border-2 transition-all flex items-center gap-1.5 text-[11px] font-bold
+                          ${stampBgColor === bg.id
+                            ? "scale-105 ring-2 ring-indigo-500/40 ring-offset-1 dark:ring-offset-slate-900"
+                            : "opacity-75 hover:opacity-100"
+                          }
+                        `}
+                      >
+                        <span className={`h-3 w-3 rounded-full border ${bg.colorClass}`} />
+                        <span className="text-slate-700 dark:text-slate-300">{bg.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 4. 字體與線條主色 */}
+                <div className="space-y-2 border-t border-slate-100 dark:border-slate-800/80 pt-3">
+                  <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block">
+                    3. 設定線條與文字主色
+                  </label>
+                  {stampBgColor === "red" || stampBgColor === "blue" || stampBgColor === "black" ? (
+                    <div className="text-[10px] text-slate-400 font-medium py-1 px-3 rounded bg-slate-50 dark:bg-slate-950/40 border border-slate-100 dark:border-slate-800/60 w-fit">
+                      💡 前景文字已自動調整為對比白
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-3 animate-fade-in">
+                      {([
+                        { id: "red", label: "紅色", dotColor: "bg-red-600" },
+                        { id: "blue", label: "藍色", dotColor: "bg-blue-600" },
+                        { id: "black", label: "黑色", dotColor: "bg-slate-900" },
+                      ] as const).map((fg) => (
+                        <button
+                          key={fg.id}
+                          type="button"
+                          onClick={() => setStampFgColor(fg.id)}
+                          className={`h-7 px-3 rounded-lg border transition-all flex items-center gap-1 text-[10px] font-bold
+                            ${stampFgColor === fg.id
+                              ? "bg-slate-100 dark:bg-slate-800 border-indigo-500 text-indigo-600 dark:text-indigo-400 ring-1 ring-indigo-500/30"
+                              : "border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-50"
+                            }
+                          `}
+                        >
+                          <span className={`h-2.5 w-2.5 rounded-full ${fg.dotColor}`} />
+                          <span>{fg.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* 右側預覽面板 */}
+              <div className="w-full md:w-[260px] flex flex-col items-center justify-between border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/30 rounded-2xl p-5 shadow-inner">
+                <div className="w-full flex-1 flex flex-col items-center justify-center gap-2">
+                  <span className="text-[10px] font-bold text-slate-400">印章效果預覽</span>
+                  
+                  {/* 預覽 Canvas 容器 */}
+                  <div className="w-full flex items-center justify-center p-3 border border-slate-100 dark:border-slate-850 rounded-xl bg-white dark:bg-slate-900 shadow-sm min-h-[160px]">
+                    <canvas
+                      ref={stampCanvasRef}
+                      className="max-w-full object-contain pointer-events-none select-none bg-transparent"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex w-full gap-2 mt-5">
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="flex-1 h-9 px-4 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-850 text-xs font-semibold text-slate-600 dark:text-slate-300 transition-colors"
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    onClick={saveStampSignature}
+                    className="flex-1 h-9 px-4 rounded-lg bg-indigo-500 hover:bg-indigo-600 text-white font-semibold text-xs transition-all shadow-md shadow-indigo-500/20 active:scale-95"
+                  >
+                    確認並使用
+                  </button>
+                </div>
               </div>
             </div>
           )}

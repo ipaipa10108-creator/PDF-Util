@@ -11,7 +11,10 @@ import {
   FileText,
   CheckSquare,
   Square,
-  FilePlus2
+  FilePlus2,
+  Bookmark,
+  Undo2,
+  Redo2
 } from "lucide-react";
 
 export interface HeaderProps {
@@ -25,6 +28,7 @@ export interface HeaderProps {
   onRotateSelected: (degrees: number) => void;
   onDeleteSelected: () => void;
   onOpenSignatureModal: () => void;
+  onOpenStampModal: () => void; // 新增圖章彈窗觸發
   onOpenInsertModal: () => void; // 新增插入 PDF 彈窗觸發
   onExport: () => void;
   onShare: () => void;
@@ -33,6 +37,10 @@ export interface HeaderProps {
   canShare: boolean;
   isDarkMode: boolean;
   onToggleDarkMode: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  onUndo: () => void;
+  onRedo: () => void;
 }
 
 export function Header({
@@ -46,6 +54,7 @@ export function Header({
   onRotateSelected,
   onDeleteSelected,
   onOpenSignatureModal,
+  onOpenStampModal,
   onOpenInsertModal, // 新增解構
   onExport,
   onShare,
@@ -54,6 +63,10 @@ export function Header({
   canShare,
   isDarkMode,
   onToggleDarkMode,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
 }: HeaderProps) {
   return (
     <header className="sticky top-0 z-40 w-full border-b backdrop-blur-md transition-colors duration-200 bg-white/80 border-slate-200 dark:bg-slate-900/80 dark:border-slate-800">
@@ -156,6 +169,26 @@ export function Header({
                 <Trash2 className="h-4.5 w-4.5" />
               </button>
 
+              {/* 撤銷與重做群組 */}
+              <div className="flex items-center gap-1 border-r border-slate-200 dark:border-slate-800 pr-2.5 mr-0.5">
+                <button
+                  onClick={onUndo}
+                  disabled={!canUndo}
+                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 disabled:opacity-30 disabled:hover:bg-transparent transition-all"
+                  title="復原 (Undo)"
+                >
+                  <Undo2 className="h-4.2 w-4.2" />
+                </button>
+                <button
+                  onClick={onRedo}
+                  disabled={!canRedo}
+                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 disabled:opacity-30 disabled:hover:bg-transparent transition-all"
+                  title="重做 (Redo)"
+                >
+                  <Redo2 className="h-4.2 w-4.2" />
+                </button>
+              </div>
+
               {/* 插入 PDF 按鈕 */}
               <button
                 onClick={onOpenInsertModal}
@@ -164,6 +197,16 @@ export function Header({
               >
                 <FilePlus2 className="h-4 w-4" />
                 <span>插入頁面</span>
+              </button>
+
+              {/* 新增圖章按鈕 */}
+              <button
+                onClick={onOpenStampModal}
+                className="flex items-center gap-1.5 h-9 px-3 rounded-lg border border-indigo-200 dark:border-indigo-900/40 bg-indigo-50/50 hover:bg-indigo-50 dark:bg-indigo-950/20 dark:hover:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 transition-all font-semibold text-xs"
+                title="建立或管理預設圖章"
+              >
+                <Bookmark className="h-4 w-4" />
+                <span>圖章</span>
               </button>
 
               {/* 新增簽章按鈕 */}
