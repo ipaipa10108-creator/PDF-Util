@@ -10,6 +10,7 @@ import { CropModal } from "@/components/pdf-suite/crop-modal";
 import { SignatureModal } from "@/components/pdf-suite/signature-modal";
 import { InsertModal } from "@/components/pdf-suite/insert-modal";
 import { CopyStampModal } from "@/components/pdf-suite/copy-stamp-modal";
+import { StampActionModal } from "@/components/pdf-suite/stamp-action-modal";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 import { 
   PdfPageInfo, 
@@ -36,6 +37,11 @@ export default function MainPage() {
   const [activeSignatureId, setActiveSignatureId] = useState<string | null>(null);
   const [signatureModalDefaultTab, setSignatureModalDefaultTab] = useState<"draw" | "upload" | "list" | "stamp">("draw");
   const [copySourceSignatureId, setCopySourceSignatureId] = useState<string | null>(null);
+  const [stampControlMode, setStampControlMode] = useLocalStorage<"buttons" | "double_click">(
+    "local_pdf_stamp_control_mode",
+    "buttons"
+  );
+  const [activeActionSignatureId, setActiveActionSignatureId] = useState<string | null>(null);
   
   // Undo/Redo 歷史狀態與堆疊
   interface HistoryState {
@@ -492,6 +498,12 @@ export default function MainPage() {
     setExportedBlob(null);
   };
 
+  const handleDeletePlacedSignature = (sigId: string) => {
+    recordHistory();
+    setPlacedSignatures(placedSignatures.filter(s => s.id !== sigId));
+    setExportedBlob(null);
+  };
+
   // 統一生成 PDF Blob 的邏輯，支援僅導出/分享被勾選的頁面
   const generatePdfBlob = async (): Promise<Blob | null> => {
     if (!file) return null;
@@ -650,6 +662,8 @@ export default function MainPage() {
         canRedo={redoStack.length > 0}
         onUndo={handleUndo}
         onRedo={handleRedo}
+        stampControlMode={stampControlMode}
+        onChangeControlMode={setStampControlMode}
       />
 
       {/* 主要內容區 */}
@@ -701,6 +715,8 @@ export default function MainPage() {
                 onCopyToAllPages={handleCopyToAllPages}
                 onOpenCopyModal={(sigId) => setCopySourceSignatureId(sigId)}
                 onRecordHistory={recordHistory}
+                stampControlMode={stampControlMode}
+                onOpenActionModal={setActiveActionSignatureId}
               />
             </div>
             
@@ -843,6 +859,19 @@ export default function MainPage() {
           </div>
         </div>
       </footer>
+
+      {/* 貼圖雙擊操作詢問彈窗 */}
+      {activeActionSignatureId !== null && (
+        <StampActionModal
+          onClose={() => setActiveActionSignatureId(null)}
+          onCopyToAll={() => handleCopyToAllPages(activeActionSignatureId)}
+          onCopyToSpecific={() => {
+            setCopySourceSignatureId(activeActionSignatureId);
+            setActiveActionSignatureId(null);
+          }}
+          onDelete={() => handleDeletePlacedSignature(activeActionSignatureId)}
+        />
+      )}
 
     </div>
   );

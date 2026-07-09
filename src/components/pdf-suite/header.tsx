@@ -1,3 +1,4 @@
+import React, { useState } from "react";
 import { 
   Sun, 
   Moon, 
@@ -14,7 +15,8 @@ import {
   FilePlus2,
   Bookmark,
   Undo2,
-  Redo2
+  Redo2,
+  Settings
 } from "lucide-react";
 
 export interface HeaderProps {
@@ -41,6 +43,8 @@ export interface HeaderProps {
   canRedo: boolean;
   onUndo: () => void;
   onRedo: () => void;
+  stampControlMode: "buttons" | "double_click";
+  onChangeControlMode: (mode: "buttons" | "double_click") => void;
 }
 
 export function Header({
@@ -67,7 +71,10 @@ export function Header({
   canRedo,
   onUndo,
   onRedo,
+  stampControlMode,
+  onChangeControlMode,
 }: HeaderProps) {
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   return (
     <header className="sticky top-0 z-40 w-full border-b backdrop-blur-md transition-colors duration-200 bg-white/80 border-slate-200 dark:bg-slate-900/80 dark:border-slate-800">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
@@ -169,26 +176,6 @@ export function Header({
                 <Trash2 className="h-4.5 w-4.5" />
               </button>
 
-              {/* 撤銷與重做群組 */}
-              <div className="flex items-center gap-1 border-r border-slate-200 dark:border-slate-800 pr-2.5 mr-0.5">
-                <button
-                  onClick={onUndo}
-                  disabled={!canUndo}
-                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 disabled:opacity-30 disabled:hover:bg-transparent transition-all"
-                  title="復原 (Undo)"
-                >
-                  <Undo2 className="h-4.2 w-4.2" />
-                </button>
-                <button
-                  onClick={onRedo}
-                  disabled={!canRedo}
-                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 disabled:opacity-30 disabled:hover:bg-transparent transition-all"
-                  title="重做 (Redo)"
-                >
-                  <Redo2 className="h-4.2 w-4.2" />
-                </button>
-              </div>
-
               {/* 插入 PDF 按鈕 */}
               <button
                 onClick={onOpenInsertModal}
@@ -219,6 +206,90 @@ export function Header({
                 <span>簽章</span>
               </button>
             </div>
+          )}
+
+          {fileName && (
+            <>
+              {/* 撤銷與重做群組 - 手機與電腦皆可見 */}
+              <div className="flex items-center gap-1 border-r border-slate-200 dark:border-slate-800 pr-2 mr-1">
+                <button
+                  onClick={onUndo}
+                  disabled={!canUndo}
+                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 disabled:opacity-30 disabled:hover:bg-transparent transition-all"
+                  title="復原 (Undo)"
+                >
+                  <Undo2 className="h-4.5 w-4.5" />
+                </button>
+                <button
+                  onClick={onRedo}
+                  disabled={!canRedo}
+                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 disabled:opacity-30 disabled:hover:bg-transparent transition-all"
+                  title="重做 (Redo)"
+                >
+                  <Redo2 className="h-4.5 w-4.5" />
+                </button>
+              </div>
+
+              {/* 貼圖操作設定 - 齒輪 Popover */}
+              <div className="relative mr-1">
+                <button
+                  onClick={() => setIsSettingsOpen(!isSettingsOpen)}
+                  className={`flex h-9 w-9 items-center justify-center rounded-lg border transition-all
+                    ${isSettingsOpen
+                      ? "border-indigo-500 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400"
+                      : "border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-880 text-slate-600 dark:text-slate-300"
+                    }
+                  `}
+                  title="貼圖操作模式設定"
+                >
+                  <Settings className={`h-4.5 w-4.5 transition-transform duration-300 ${isSettingsOpen ? "rotate-45" : ""}`} />
+                </button>
+
+                {/* Popover 面板 */}
+                {isSettingsOpen && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setIsSettingsOpen(false)} />
+                    <div className="absolute right-0 mt-2 w-48 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xl p-2.5 z-50 animate-scale-in text-xs">
+                      <div className="font-bold text-slate-400 px-2 py-1 text-[10px] tracking-wider uppercase">
+                        貼圖操作設定
+                      </div>
+                      <div className="mt-1.5 space-y-1">
+                        <button
+                          onClick={() => {
+                            onChangeControlMode("buttons");
+                            setIsSettingsOpen(false);
+                          }}
+                          className={`w-full text-left px-2.5 py-2 rounded-lg font-semibold transition-all flex items-center justify-between
+                            ${stampControlMode === "buttons"
+                              ? "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400"
+                              : "text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-850"
+                            }
+                          `}
+                        >
+                          <span>懸浮顯示控制按鈕</span>
+                          {stampControlMode === "buttons" && <span className="text-[10px]">✓</span>}
+                        </button>
+                        <button
+                          onClick={() => {
+                            onChangeControlMode("double_click");
+                            setIsSettingsOpen(false);
+                          }}
+                          className={`w-full text-left px-2.5 py-2 rounded-lg font-semibold transition-all flex items-center justify-between
+                            ${stampControlMode === "double_click"
+                              ? "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400"
+                              : "text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-850"
+                            }
+                          `}
+                        >
+                          <span>雙擊貼圖彈窗詢問</span>
+                          {stampControlMode === "double_click" && <span className="text-[10px]">✓</span>}
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            </>
           )}
 
           {/* 深淺色模式切換 */}

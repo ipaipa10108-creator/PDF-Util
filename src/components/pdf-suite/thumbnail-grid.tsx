@@ -21,6 +21,8 @@ export interface ThumbnailGridProps {
   onCopyToAllPages: (sigId: string) => void;
   onOpenCopyModal: (sigId: string) => void;
   onRecordHistory: () => void;
+  stampControlMode: "buttons" | "double_click";
+  onOpenActionModal: (sigId: string) => void;
 }
 
 export function ThumbnailGrid({
@@ -41,6 +43,8 @@ export function ThumbnailGrid({
   onCopyToAllPages,
   onOpenCopyModal,
   onRecordHistory,
+  stampControlMode,
+  onOpenActionModal,
 }: ThumbnailGridProps) {
   
   const isPlacementMode = !!activeSignatureId;
@@ -201,6 +205,8 @@ export function ThumbnailGrid({
                     onCopyToAllPages={onCopyToAllPages}
                     onOpenCopyModal={onOpenCopyModal}
                     onRecordHistory={onRecordHistory}
+                    stampControlMode={stampControlMode}
+                    onOpenActionModal={onOpenActionModal}
                   />
                 )}
 

@@ -12,6 +12,8 @@ export interface SignatureLayerProps {
   onCopyToAllPages: (sigId: string) => void;
   onOpenCopyModal: (sigId: string) => void;
   onRecordHistory: () => void;
+  stampControlMode: "buttons" | "double_click";
+  onOpenActionModal: (sigId: string) => void;
 }
 
 export function SignatureLayer({
@@ -24,6 +26,8 @@ export function SignatureLayer({
   onCopyToAllPages,
   onOpenCopyModal,
   onRecordHistory,
+  stampControlMode,
+  onOpenActionModal,
 }: SignatureLayerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   
@@ -274,7 +278,7 @@ export function SignatureLayer({
         return (
           <div
             key={sig.id}
-            className="absolute border border-dashed border-indigo-500 bg-indigo-500/5 hover:bg-indigo-500/10 cursor-move group/sig select-none shadow-sm rounded transition-shadow hover:shadow-indigo-500/20 touch-none"
+            className="absolute border border-dashed border-indigo-500 bg-indigo-500/5 hover:bg-indigo-500/10 cursor-move group/sig select-none shadow-sm rounded transition-shadow hover:shadow-indigo-500/20 touch-none animate-fade-in"
             style={{
               left: `${sig.x * 100}%`,
               top: `${sig.y * 100}%`,
@@ -283,6 +287,13 @@ export function SignatureLayer({
             }}
             onMouseDown={(e) => handleStartDrag(e, sig.id, sig.x, sig.y, sig.width, sig.height)}
             onTouchStart={(e) => handleStartDragTouch(e, sig.id, sig.x, sig.y, sig.width, sig.height)}
+            onDoubleClick={(e) => {
+              if (stampControlMode === "double_click") {
+                e.preventDefault();
+                e.stopPropagation();
+                onOpenActionModal(sig.id);
+              }
+            }}
           >
             {/* 簽章影像 */}
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -292,43 +303,57 @@ export function SignatureLayer({
               className="w-full h-full object-contain pointer-events-none"
             />
 
-            {/* 左上角複製到全部頁面按鈕 */}
-            <button
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                onCopyToAllPages(sig.id);
-              }}
-              onTouchStart={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                onCopyToAllPages(sig.id);
-              }}
-              className="absolute -top-2.5 -left-2.5 flex h-5 w-5 items-center justify-center rounded-full bg-indigo-600 hover:bg-indigo-700 text-white shadow-md border border-white opacity-80 sm:opacity-0 group-hover/sig:opacity-100 transition-opacity"
-              title="全部張貼 (複製到所有其他頁面的相同位置)"
-            >
-              <Copy className="h-2.5 w-2.5" />
-            </button>
+            {stampControlMode === "buttons" && (
+              <>
+                {/* 左上角複製到全部頁面按鈕 */}
+                <button
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onCopyToAllPages(sig.id);
+                  }}
+                  onTouchStart={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onCopyToAllPages(sig.id);
+                  }}
+                  className="absolute -top-2.5 -left-2.5 flex h-5 w-5 items-center justify-center rounded-full bg-indigo-600 hover:bg-indigo-700 text-white shadow-md border border-white opacity-80 sm:opacity-0 group-hover/sig:opacity-100 transition-opacity"
+                  title="全部張貼 (複製到所有其他頁面的相同位置)"
+                >
+                  <Copy className="h-2.5 w-2.5" />
+                </button>
 
-            {/* 左上角複製到指定頁面按鈕 */}
-            <button
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                onOpenCopyModal(sig.id);
-              }}
-              onTouchStart={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                onOpenCopyModal(sig.id);
-              }}
-              className="absolute -top-2.5 left-3.5 flex h-5 w-5 items-center justify-center rounded-full bg-violet-600 hover:bg-violet-700 text-white shadow-md border border-white opacity-80 sm:opacity-0 group-hover/sig:opacity-100 transition-opacity"
-              title="指定頁面張貼..."
-            >
-              <Layers className="h-2.5 w-2.5" />
-            </button>
+                {/* 左上角複製到指定頁面按鈕 */}
+                <button
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onOpenCopyModal(sig.id);
+                  }}
+                  onTouchStart={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onOpenCopyModal(sig.id);
+                  }}
+                  className="absolute -top-2.5 left-3.5 flex h-5 w-5 items-center justify-center rounded-full bg-violet-600 hover:bg-violet-700 text-white shadow-md border border-white opacity-80 sm:opacity-0 group-hover/sig:opacity-100 transition-opacity"
+                  title="指定頁面張貼..."
+                >
+                  <Layers className="h-2.5 w-2.5" />
+                </button>
 
-            {/* 右下角縮放手柄 */}
+                {/* 右上角刪除按鈕 */}
+                <button
+                  onClick={(e) => handleDelete(e, sig.id)}
+                  onTouchStart={(e) => handleDelete(e, sig.id)}
+                  className="absolute -top-2.5 -right-2.5 flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 hover:bg-rose-600 text-white shadow-md border border-white opacity-80 sm:opacity-0 group-hover/sig:opacity-100 transition-opacity"
+                  title="移出此簽章"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </>
+            )}
+
+            {/* 右下角縮放手柄 (在雙擊模式下也保留，以方便微調大小) */}
             <div
               className="absolute bottom-0 right-0 h-4.5 w-4.5 rounded-full bg-indigo-500 border border-white cursor-se-resize shadow-md translate-x-1.5 translate-y-1.5 opacity-80 sm:opacity-0 group-hover/sig:opacity-100 transition-opacity flex items-center justify-center text-[8px] text-white font-bold"
               onMouseDown={(e) => handleStartResize(e, sig.id, sig.x, sig.y, sig.width, sig.height)}
@@ -337,16 +362,6 @@ export function SignatureLayer({
             >
               ⤾
             </div>
-
-            {/* 右上角刪除按鈕 */}
-            <button
-              onClick={(e) => handleDelete(e, sig.id)}
-              onTouchStart={(e) => handleDelete(e, sig.id)}
-              className="absolute -top-2.5 -right-2.5 flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 hover:bg-rose-600 text-white shadow-md border border-white opacity-80 sm:opacity-0 group-hover/sig:opacity-100 transition-opacity"
-              title="移出此簽章"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
           </div>
         );
       })}
