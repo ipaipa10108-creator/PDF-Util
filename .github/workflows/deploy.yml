@@ -18,6 +18,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.repository == 'ipaipa10108-creator/PDF-Util'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
