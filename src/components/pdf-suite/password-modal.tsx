@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from "react";
-import { Lock, X, Eye, EyeOff, AlertCircle } from "lucide-react";
+import { Lock, X, Eye, EyeOff, AlertCircle, Zap } from "lucide-react";
 
 export interface PasswordModalProps {
   fileName: string;
@@ -9,6 +9,8 @@ export interface PasswordModalProps {
   isLoading?: boolean;
   onConfirm: (password: string) => void;
   onCancel: () => void;
+  /** 從 PasswordModal 切換到破解模式 */
+  onCrack?: () => void;
 }
 
 export function PasswordModal({
@@ -17,6 +19,7 @@ export function PasswordModal({
   isLoading = false,
   onConfirm,
   onCancel,
+  onCrack,
 }: PasswordModalProps) {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -147,6 +150,21 @@ export function PasswordModal({
               </button>
             </div>
           </form>
+
+          {/* 破解入口 */}
+          {onCrack && (
+            <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 text-center">
+              <button
+                type="button"
+                onClick={onCrack}
+                disabled={isLoading}
+                className="inline-flex items-center gap-1.5 text-xs text-violet-600 dark:text-violet-400 hover:text-violet-800 dark:hover:text-violet-200 font-semibold transition-colors disabled:opacity-40"
+              >
+                <Zap className="h-3.5 w-3.5" />
+                忘記密碼？嘗試自動破解
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

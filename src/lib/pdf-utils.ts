@@ -50,7 +50,35 @@ async function getPdfjsLib(): Promise<typeof PdfJsType> {
     pdfjsInstance = pdfjs;
   }
   return pdfjsInstance;
-}/**
+}
+
+/**
+ * 測試指定密碼是否能開啟 PDF（ArrayBuffer 版本，可反複使用同一份資料）
+ * @returns true = 密碼正確；false = 密碼錯誤；throws = 非密碼錯誤
+ */
+export async function testPdfPassword(
+  arrayBuffer: ArrayBuffer,
+  password: string
+): Promise<boolean> {
+  const pdfjs = await getPdfjsLib();
+  let task: PdfJsType.PDFDocumentLoadingTask | null = null;
+  try {
+    task = pdfjs.getDocument({ data: arrayBuffer.slice(0), password });
+    const doc = await task.promise;
+    doc.destroy();
+    return true;
+  } catch (e: unknown) {
+    const err = e as Record<string, unknown>;
+    // PasswordException code 1 = NEED_PASSWORD (no password given)
+    // PasswordException code 2 = INCORRECT_PASSWORD
+    if (err?.["name"] === "PasswordException") return false;
+    throw e;
+  } finally {
+    task?.destroy?.();
+  }
+}
+
+/**
  * 從 File 載入 PDF，並產生每一頁的預覽與尺寸資訊，支援載入指定頁碼範圍
  */
 export async function loadPdfPages(
@@ -141,9 +169,8 @@ export async function exportPdf({
   const loadedDocsMap: Record<string, PDFDocument> = {};
   for (const [fileId, fileObj] of Object.entries(filesMap)) {
     const bytes = await fileObj.arrayBuffer();
-    const password = filePasswordsMap[fileId];
     loadedDocsMap[fileId] = await PDFDocument.load(bytes, {
-      ...(password ? ({ password } as unknown as Parameters<typeof PDFDocument.load>[1]) : {}),
+      ignoreEncryption: true,
     });
   }
   

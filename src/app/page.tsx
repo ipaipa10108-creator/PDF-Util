@@ -13,6 +13,7 @@ import { CopyStampModal } from "@/components/pdf-suite/copy-stamp-modal";
 import { StampActionModal } from "@/components/pdf-suite/stamp-action-modal";
 import { PasswordModal } from "@/components/pdf-suite/password-modal";
 import { ExportPasswordModal, ExportPasswordMode } from "@/components/pdf-suite/export-password-modal";
+import { CrackPasswordModal } from "@/components/pdf-suite/crack-password-modal";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 import { 
   PdfPageInfo, 
@@ -35,6 +36,7 @@ export default function MainPage() {
   /** 等待輸入密碼的暫存檔案 */
   const [pendingPasswordFile, setPendingPasswordFile] = useState<File | null>(null);
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
+  const [isCrackModalOpen, setIsCrackModalOpen] = useState(false);
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [isPasswordLoading, setIsPasswordLoading] = useState(false);
   const [isInsertModalOpen, setIsInsertModalOpen] = useState(false);
@@ -946,6 +948,25 @@ export default function MainPage() {
           isLoading={isPasswordLoading}
           onConfirm={handlePasswordConfirm}
           onCancel={handlePasswordCancel}
+          onCrack={() => {
+            setIsPasswordModalOpen(false);
+            setIsCrackModalOpen(true);
+          }}
+        />
+      )}
+
+      {/* PDF 自動密碼破解彈窗 */}
+      {isCrackModalOpen && pendingPasswordFile && (
+        <CrackPasswordModal
+          file={pendingPasswordFile}
+          onFound={(foundPw) => {
+            setIsCrackModalOpen(false);
+            handlePasswordConfirm(foundPw);
+          }}
+          onCancel={() => {
+            setIsCrackModalOpen(false);
+            setIsPasswordModalOpen(true);
+          }}
         />
       )}
 
