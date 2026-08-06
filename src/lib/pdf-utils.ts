@@ -165,13 +165,23 @@ export async function exportPdf({
   filePasswordsMap = {},
   outputPassword,
 }: ExportPdfParams): Promise<Blob> {
-  // 1. 載入所有來源 PDF 文件並進行快取（若有密碼則傳入解密）
+  // 1. 載入 pdf-lib 文件 (無視加密供結構讀取) 與 pdfjs 文件 (用密碼解密供高解析度重繪)
   const loadedDocsMap: Record<string, PDFDocument> = {};
+  const pdfjsDocsMap: Record<string, any> = {};
+
   for (const [fileId, fileObj] of Object.entries(filesMap)) {
     const bytes = await fileObj.arrayBuffer();
     loadedDocsMap[fileId] = await PDFDocument.load(bytes, {
       ignoreEncryption: true,
     });
+
+    // 如果該檔案有開啟密碼，使用 pdfjs-dist 加載解密後的文件
+    const password = filePasswordsMap[fileId];
+    if (password !== undefined) {
+      const pdfjs = await getPdfjsLib();
+      const loadingTask = pdfjs.getDocument({ data: bytes.slice(0), password });
+      pdfjsDocsMap[fileId] = await loadingTask.promise;
+    }
   }
   
   // 2. 建立全新的 PDF 文件
@@ -191,73 +201,96 @@ export async function exportPdf({
   for (let i = 0; i < activePages.length; i++) {
     const pageConfig = activePages[i];
     const srcDoc = loadedDocsMap[pageConfig.fileId];
-    if (!srcDoc) continue;
-    
-    // 拷貝對應檔案的對應頁面 (拷貝單個頁面)
-    const [copiedPage] = await newDoc.copyPages(srcDoc, [pageConfig.sourcePageIndex]);
-    const { width: pageW, height: pageH } = copiedPage.getSize();
+    const pdfjsDoc = pdfjsDocsMap[pageConfig.fileId];
+
+    let targetPage: any;
+    let pageW = pageConfig.width;
+    let pageH = pageConfig.height;
+
+    if (pdfjsDoc) {
+      // 🌟 加密 PDF 解密導出：透過 PDF.js 將解密頁面渲染為 2.0x 高解析度圖像繪入新頁面 (防止內容空白)
+      const pdfjsPage = await pdfjsDoc.getPage(pageConfig.sourcePageIndex + 1);
+      const viewport = pdfjsPage.getViewport({ scale: 2.0 });
+
+      const canvas = document.createElement("canvas");
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        await pdfjsPage.render({ canvasContext: ctx, viewport }).promise;
+      }
+
+      const imgDataUrl = canvas.toDataURL("image/jpeg", 0.92);
+      const base64Data = imgDataUrl.split(",")[1];
+      const imgBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
+
+      const bgImg = await newDoc.embedJpg(imgBytes);
+      targetPage = newDoc.addPage([pageW, pageH]);
+      targetPage.drawImage(bgImg, {
+        x: 0,
+        y: 0,
+        width: pageW,
+        height: pageH,
+      });
+    } else {
+      // 🌟 未加密正常 PDF：保持 100% 原始向量品質與極小檔案體積
+      if (!srcDoc) continue;
+      const [copiedPage] = await newDoc.copyPages(srcDoc, [pageConfig.sourcePageIndex]);
+      const size = copiedPage.getSize();
+      pageW = size.width;
+      pageH = size.height;
+      targetPage = newDoc.addPage(copiedPage);
+    }
     
     // A. 套用頁面旋轉
     if (pageConfig.rotation !== 0) {
-      copiedPage.setRotation(degrees(pageConfig.rotation));
+      targetPage.setRotation(degrees(pageConfig.rotation));
     }
     
     // B. 套用頁面裁切 (CropBox)
     if (pageConfig.cropBox) {
       const { x: rx, y: ry, width: rw, height: rh } = pageConfig.cropBox;
-      // 換算成 PDF 內部 points 座標 (注意 PDF 的原點是在左下角，而 Canvas 在左上角)
       const cropX = rx * pageW;
       const cropW = rw * pageW;
       const cropH = rh * pageH;
-      // PDF y_pdf = H_pdf - (y_canvas + h_canvas)
       const cropY = pageH - (ry + rh) * pageH;
       
-      copiedPage.setCropBox(cropX, cropY, cropW, cropH);
+      targetPage.setCropBox(cropX, cropY, cropW, cropH);
     }
     
-    // C. 壓印電子簽章 (Flatten) - 根據頁面的唯一 ID `id` 進行簽名匹配
+    // C. 壓印電子簽章 (Flatten)
     const pageSignatures = signatures.filter(sig => sig.pageId === pageConfig.id);
     
     for (const sig of pageSignatures) {
       const savedSig = savedSignatures.find(s => s.id === sig.signatureImageId);
       if (!savedSig) continue;
       
-      // 如果該簽章圖片尚未嵌入，則進行嵌入
       if (!embeddedSignaturesMap[savedSig.id]) {
-        // 從 Base64 Data URL 提取圖片 bytes
         const base64Data = savedSig.dataUrl.split(",")[1];
         const imgBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
-        
-        // 嵌入 PNG
         const embeddedImg = await newDoc.embedPng(imgBytes);
         embeddedSignaturesMap[savedSig.id] = embeddedImg;
       }
       
       const embeddedImg = embeddedSignaturesMap[savedSig.id];
       
-      // 換算簽章在 PDF 頁面中的物理座標 (同樣換算 PDF 左下角原點)
       const sigX = sig.x * pageW;
       const sigW = sig.width * pageW;
       const sigH = sig.height * pageH;
-      // PDF y_pdf = H_pdf - (y_canvas + h_canvas)
       const sigY = pageH - (sig.y + sig.height) * pageH;
       
-      copiedPage.drawImage(embeddedImg, {
+      targetPage.drawImage(embeddedImg, {
         x: sigX,
         y: sigY,
         width: sigW,
         height: sigH,
       });
     }
-    
-    // 將編輯後的頁面加入新文件
-    newDoc.addPage(copiedPage);
   }
   
   // 5. 輸出 PDF 位元組並按需加密
   const pdfBytes = await newDoc.save();
 
-  // 若有設定輸出密碼，使用 encryptPDF 進行 RC4 128-bit 加密
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let finalBytes: any;
   if (outputPassword) {
