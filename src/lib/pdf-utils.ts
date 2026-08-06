@@ -42,7 +42,6 @@ async function getPdfjsLib(): Promise<typeof PdfJsType> {
   }
   if (!pdfjsInstance) {
     const pdfjs = await import("pdfjs-dist");
-    // 使用 Webpack 原生機制載入同源 Worker，避免瀏覽器的 Web Worker 跨域 (CORS) 安全策略限制
     pdfjs.GlobalWorkerOptions.workerSrc = new URL(
       "pdfjs-dist/build/pdf.worker.min.mjs",
       import.meta.url
@@ -63,14 +62,22 @@ export async function testPdfPassword(
   const pdfjs = await getPdfjsLib();
   let task: PdfJsType.PDFDocumentLoadingTask | null = null;
   try {
-    task = pdfjs.getDocument({ data: arrayBuffer.slice(0), password });
+    const loadingParams: any = { data: arrayBuffer.slice(0) };
+    if (password && password.length > 0) {
+      loadingParams.password = password;
+    }
+    task = pdfjs.getDocument(loadingParams);
+    task.onPassword = (updatePassword: Function, reason: number) => {
+      const err: any = new Error("PasswordException");
+      err.name = "PasswordException";
+      err.code = reason;
+      throw err;
+    };
     const doc = await task.promise;
     doc.destroy();
     return true;
   } catch (e: unknown) {
     const err = e as Record<string, unknown>;
-    // PasswordException code 1 = NEED_PASSWORD (no password given)
-    // PasswordException code 2 = INCORRECT_PASSWORD
     if (err?.["name"] === "PasswordException") return false;
     throw e;
   } finally {
@@ -91,7 +98,21 @@ export async function loadPdfPages(
   const pdfjs = await getPdfjsLib();
   
   // 載入 PDF 文件進行渲染（若有密碼則傳入）
-  const loadingTask = pdfjs.getDocument({ data: arrayBuffer, password: password ?? "" });
+  const loadingParams: any = { data: arrayBuffer };
+  if (password && password.length > 0) {
+    loadingParams.password = password;
+  }
+
+  const loadingTask = pdfjs.getDocument(loadingParams);
+  
+  // 監聽 PDF.js 密碼事件：若請求密碼，拋出 PasswordException 供外層彈窗攔截
+  loadingTask.onPassword = (updatePassword: Function, reason: number) => {
+    const err: any = new Error(reason === 2 ? "Incorrect password" : "Password required");
+    err.name = "PasswordException";
+    err.code = reason;
+    throw err;
+  };
+
   const pdfDoc = await loadingTask.promise;
   const numPages = pdfDoc.numPages;
   
@@ -114,6 +135,10 @@ export async function loadPdfPages(
     const context = canvas.getContext("2d");
     
     if (context) {
+      // 純白底色填充，避免透明頁面背景缺失
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+
       await page.render({
         canvasContext: context,
         viewport: viewport,
@@ -142,6 +167,7 @@ export async function loadPdfPages(
   
   return pagesInfo;
 }
+
 interface ExportPdfParams {
   filesMap: Record<string, File>; // 用於支援多個檔案的 Map，key 為 fileId
   pages: PdfPageInfo[];
@@ -177,9 +203,15 @@ export async function exportPdf({
 
     // 如果該檔案有開啟密碼，使用 pdfjs-dist 加載解密後的文件
     const password = filePasswordsMap[fileId];
-    if (password !== undefined) {
+    if (password !== undefined && password.length > 0) {
       const pdfjs = await getPdfjsLib();
-      const loadingTask = pdfjs.getDocument({ data: bytes.slice(0), password });
+      const loadingParams: any = { data: bytes.slice(0), password };
+      const loadingTask = pdfjs.getDocument(loadingParams);
+      loadingTask.onPassword = (updatePassword: Function, reason: number) => {
+        const err: any = new Error("Password required");
+        err.name = "PasswordException";
+        throw err;
+      };
       pdfjsDocsMap[fileId] = await loadingTask.promise;
     }
   }
@@ -217,6 +249,10 @@ export async function exportPdf({
       canvas.height = viewport.height;
       const ctx = canvas.getContext("2d");
       if (ctx) {
+        // 白底填充，避免透明 PDF 渲染空白或黑底
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
         await pdfjsPage.render({ canvasContext: ctx, viewport }).promise;
       }
 
