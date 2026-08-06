@@ -11,6 +11,8 @@ import { SignatureModal } from "@/components/pdf-suite/signature-modal";
 import { InsertModal } from "@/components/pdf-suite/insert-modal";
 import { CopyStampModal } from "@/components/pdf-suite/copy-stamp-modal";
 import { StampActionModal } from "@/components/pdf-suite/stamp-action-modal";
+import { PasswordModal } from "@/components/pdf-suite/password-modal";
+import { ExportPasswordModal, ExportPasswordMode } from "@/components/pdf-suite/export-password-modal";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 import { 
   PdfPageInfo, 
@@ -28,6 +30,13 @@ interface WebShareNavigator {
 export default function MainPage() {
   const [file, setFile] = useState<File | null>(null);
   const [filesMap, setFilesMap] = useState<Record<string, File>>({});
+  /** 各 fileId 對應的開啟密碼，供匯出時解密使用 */
+  const [filePasswordsMap, setFilePasswordsMap] = useState<Record<string, string>>({});
+  /** 等待輸入密碼的暫存檔案 */
+  const [pendingPasswordFile, setPendingPasswordFile] = useState<File | null>(null);
+  const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [isPasswordLoading, setIsPasswordLoading] = useState(false);
   const [isInsertModalOpen, setIsInsertModalOpen] = useState(false);
   const [presetInsertFile, setPresetInsertFile] = useState<File | null>(null);
   const [isDragOverWindow, setIsDragOverWindow] = useState(false);
@@ -91,6 +100,11 @@ export default function MainPage() {
   // 緩存最近一次導出成功的 Blob，以供 Web Share 分享使用
   const [exportedBlob, setExportedBlob] = useState<Blob | null>(null);
   const [canShare, setCanShare] = useState(false);
+
+  // 匹出密碼彈窗狀態
+  const [isExportPasswordModalOpen, setIsExportPasswordModalOpen] = useState(false);
+  /** 待確認分享操作：判斷是 「導出」 還是 「分享」 */
+  const [pendingExportAction, setPendingExportAction] = useState<"export" | "share" | null>(null);
   
   // 深色模式狀態
   const [isDarkMode, setIsDarkMode] = useState(false);
@@ -175,8 +189,16 @@ export default function MainPage() {
     }
   };
 
+  // 判斷是否為密碼錯誤（pdfjs 的 PasswordException）
+  const isPasswordError = (error: unknown): boolean => {
+    if (!error || typeof error !== "object") return false;
+    const e = error as Record<string, unknown>;
+    // pdfjs-dist PasswordException 的 name 為 "PasswordException"
+    return e["name"] === "PasswordException" || (typeof e["message"] === "string" && (e["message"] as string).toLowerCase().includes("password"));
+  };
+
   // 檔案選取處理
-  const handleFileSelect = async (selectedFile: File) => {
+  const handleFileSelect = async (selectedFile: File, password?: string) => {
     setIsLoading(true);
     setExportedBlob(null);
     setPlacedSignatures([]);
@@ -185,18 +207,59 @@ export default function MainPage() {
     setRedoStack([]);
     
     try {
-      setFile(selectedFile);
       const fileId = "file-main";
+      const loadedPages = await loadPdfPages(selectedFile, fileId, undefined, password);
+      // 成功載入
+      setFile(selectedFile);
       setFilesMap({ [fileId]: selectedFile });
-      const loadedPages = await loadPdfPages(selectedFile, fileId);
+      // 若有密碼，記錄起來供匯出使用
+      if (password) {
+        setFilePasswordsMap({ [fileId]: password });
+      } else {
+        setFilePasswordsMap({});
+      }
       setPages(loadedPages);
+      // 關閉密碼彈窗（如果是從密碼流程進來的）
+      setIsPasswordModalOpen(false);
+      setPendingPasswordFile(null);
+      setPasswordError(null);
     } catch (error) {
-      console.error("Error loading PDF file", error);
-      alert("無法讀取或解析 PDF 文件，請確保該檔案為標準且未受密碼保護的 PDF。\n詳細錯誤資訊：" + (error instanceof Error ? error.message : String(error)));
-      setFile(null);
+      if (isPasswordError(error)) {
+        // PDF 需要密碼 → 開啟密碼彈窗
+        setPendingPasswordFile(selectedFile);
+        setIsPasswordModalOpen(true);
+        if (password) {
+          // 已輸入密碼但還是錯 → 顯示錯誤
+          setPasswordError("密碼不正確，請重新輸入。");
+        }
+        setFile(null);
+      } else {
+        console.error("Error loading PDF file", error);
+        alert("無法讀取或解析 PDF 文件，請確認檔案是否完整。\n詳細錯誤：" + (error instanceof Error ? error.message : String(error)));
+        setFile(null);
+      }
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // 密碼確認回呼
+  const handlePasswordConfirm = async (password: string) => {
+    if (!pendingPasswordFile) return;
+    setPasswordError(null);
+    setIsPasswordLoading(true);
+    try {
+      await handleFileSelect(pendingPasswordFile, password);
+    } finally {
+      setIsPasswordLoading(false);
+    }
+  };
+
+  const handlePasswordCancel = () => {
+    setIsPasswordModalOpen(false);
+    setPendingPasswordFile(null);
+    setPasswordError(null);
+    setIsLoading(false);
   };
 
   // 處理 PDF 頁面插入邏輯
@@ -480,7 +543,6 @@ export default function MainPage() {
   const handleCopyToPages = (sigId: string, targetPageIds: string[]) => {
     const sourceSig = placedSignatures.find(s => s.id === sigId);
     if (!sourceSig) return;
-
     recordHistory();
     const validTargetPageIds = targetPageIds.filter(id => id !== sourceSig.pageId);
 
@@ -504,8 +566,8 @@ export default function MainPage() {
     setExportedBlob(null);
   };
 
-  // 統一生成 PDF Blob 的邏輯，支援僅導出/分享被勾選的頁面
-  const generatePdfBlob = async (): Promise<Blob | null> => {
+  // 統一生成 PDF Blob，支援輸出密碼
+  const generatePdfBlob = async (outputPassword?: string | null): Promise<Blob | null> => {
     if (!file) return null;
 
     const hasSelection = selectedIndices.size > 0;
@@ -526,36 +588,56 @@ export default function MainPage() {
       pages: pagesToExport,
       signatures: placedSignatures,
       savedSignatures,
+      filePasswordsMap,
+      outputPassword,
     });
   };
 
-  // 匯出 PDF
-  const handleExport = async () => {
-    if (!file) return;
+  // 密碼彈窗確認 → 實際執行匯出或分享
+  const handleExportPasswordConfirm = async (
+    mode: ExportPasswordMode,
+    password?: string
+  ) => {
+    setIsExportPasswordModalOpen(false);
+    const outputPassword = mode === "remove" ? null : (password ?? null);
+    const action = pendingExportAction;
+    setPendingExportAction(null);
+
     setIsExporting(true);
-    
     try {
-      const blob = await generatePdfBlob();
+      const blob = await generatePdfBlob(outputPassword);
       if (!blob) return;
 
-      setExportedBlob(blob);
-
-      // 下載機制
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `edited_${file.name}`;
-      a.click();
-      URL.revokeObjectURL(url);
-
-      // 觸發彩花特效
-      confetti({
-        particleCount: 110,
-        spread: 80,
-        origin: { y: 0.6 },
-        colors: ["#6366f1", "#8b5cf6", "#a78bfa", "#ec4899"],
-      });
-
+      if (action === "share") {
+        const fileToShare = new File([blob], `edited_${file!.name}`, { type: "application/pdf" });
+        const nav = navigator as unknown as WebShareNavigator;
+        if (nav.canShare && nav.canShare({ files: [fileToShare] }) && nav.share) {
+          await nav.share({
+            files: [fileToShare],
+            title: "分享您的 PDF 文件",
+            text: selectedIndices.size > 0
+              ? `這是您勾選分享的 PDF 頁面 (${selectedIndices.size} 頁)。`
+              : "這是使用 Local PDF Suite 編輯並完成電子簽署的文件。",
+          });
+        } else {
+          alert("此瀏覽器/系統不支援分享該 PDF 檔案。");
+        }
+      } else {
+        // 下載
+        setExportedBlob(blob);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `edited_${file!.name}`;
+        a.click();
+        URL.revokeObjectURL(url);
+        confetti({
+          particleCount: 110,
+          spread: 80,
+          origin: { y: 0.6 },
+          colors: ["#6366f1", "#8b5cf6", "#a78bfa", "#ec4899"],
+        });
+      }
     } catch (error) {
       console.error("Error exporting PDF", error);
       alert("導出 PDF 時發生錯誤: " + (error instanceof Error ? error.message : String(error)));
@@ -564,37 +646,20 @@ export default function MainPage() {
     }
   };
 
-  // Web Share 原生分享
-  const handleShare = async () => {
+  // 匯出按鈕 → 先彈出密碼選項彈窗
+  const handleExport = () => {
     if (!file) return;
-    setIsExporting(true); // 進入導出中狀態
-
-    try {
-      const blob = await generatePdfBlob();
-      if (!blob) return;
-
-      const fileToShare = new File([blob], `edited_${file.name}`, {
-        type: "application/pdf",
-      });
-
-      const nav = navigator as unknown as WebShareNavigator;
-      if (nav.canShare && nav.canShare({ files: [fileToShare] }) && nav.share) {
-        await nav.share({
-          files: [fileToShare],
-          title: "分享您的 PDF 文件",
-          text: selectedIndices.size > 0 
-            ? `這是您勾選分享的 PDF 頁面 (${selectedIndices.size} 頁)。` 
-            : "這是使用 Local PDF Suite 編輯並完成電子簽署的文件。",
-        });
-      } else {
-        alert("此瀏覽器/系統不支援分享該 PDF 檔案。");
-      }
-    } catch (error) {
-      console.error("Error calling navigator.share", error);
-    } finally {
-      setIsExporting(false);
-    }
+    setPendingExportAction("export");
+    setIsExportPasswordModalOpen(true);
   };
+
+  // 分享按鈕 → 先彈出密碼選項彈窗
+  const handleShare = () => {
+    if (!file) return;
+    setPendingExportAction("share");
+    setIsExportPasswordModalOpen(true);
+  };
+
 
   const handleReset = () => {
     if (confirm("您確定要清除目前的文件嗎？所有未導出的修改將會遺失。")) {
@@ -870,6 +935,30 @@ export default function MainPage() {
             setActiveActionSignatureId(null);
           }}
           onDelete={() => handleDeletePlacedSignature(activeActionSignatureId)}
+        />
+      )}
+
+      {/* PDF 密碼輸入彈窗 */}
+      {isPasswordModalOpen && pendingPasswordFile && (
+        <PasswordModal
+          fileName={pendingPasswordFile.name}
+          errorMessage={passwordError}
+          isLoading={isPasswordLoading}
+          onConfirm={handlePasswordConfirm}
+          onCancel={handlePasswordCancel}
+        />
+      )}
+
+      {/* 匯出密碼設定彈窗 */}
+      {isExportPasswordModalOpen && (
+        <ExportPasswordModal
+          hasPassword={Object.keys(filePasswordsMap).length > 0}
+          originalPassword={filePasswordsMap["file-main"]}
+          onConfirm={handleExportPasswordConfirm}
+          onCancel={() => {
+            setIsExportPasswordModalOpen(false);
+            setPendingExportAction(null);
+          }}
         />
       )}
 

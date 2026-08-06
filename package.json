@@ -15,7 +15,8 @@
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^4.8.69",
     "lucide-react": "^0.469.0",
-    "canvas-confetti": "^1.9.3"
+    "canvas-confetti": "^1.9.3",
+    "@pdfsmaller/pdf-encrypt-lite": "^1.2.0"
   },
   "devDependencies": {
     "typescript": "^5.7.2",

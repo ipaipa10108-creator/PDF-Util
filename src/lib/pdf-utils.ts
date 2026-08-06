@@ -1,5 +1,6 @@
 import type * as PdfJsType from "pdfjs-dist";
 import { PDFDocument, degrees } from "pdf-lib";
+import { encryptPDF } from "@pdfsmaller/pdf-encrypt-lite";
 
 export interface PdfPageInfo {
   id: string; // 唯一 ID
@@ -55,13 +56,14 @@ async function getPdfjsLib(): Promise<typeof PdfJsType> {
 export async function loadPdfPages(
   file: File,
   fileId: string,
-  targetPageIndices?: number[]
+  targetPageIndices?: number[],
+  password?: string
 ): Promise<PdfPageInfo[]> {
   const arrayBuffer = await file.arrayBuffer();
   const pdfjs = await getPdfjsLib();
   
-  // 載入 PDF 文件進行渲染
-  const loadingTask = pdfjs.getDocument({ data: arrayBuffer });
+  // 載入 PDF 文件進行渲染（若有密碼則傳入）
+  const loadingTask = pdfjs.getDocument({ data: arrayBuffer, password: password ?? "" });
   const pdfDoc = await loadingTask.promise;
   const numPages = pdfDoc.numPages;
   
@@ -117,22 +119,32 @@ interface ExportPdfParams {
   pages: PdfPageInfo[];
   signatures: PlacedSignature[];
   savedSignatures: SavedSignature[];
+  /** 各 fileId 對應的開啟密碼（加密 PDF 才需要） */
+  filePasswordsMap?: Record<string, string>;
+  /** 匯出 PDF 的密碼：字串 = 加密，undefined/null = 不加密 */
+  outputPassword?: string | null;
 }
 
 /**
  * 根據使用者編輯操作，重組、旋轉、裁切 PDF 並壓印簽名，最後導出新 PDF Blob
+ * 若原始 PDF 有密碼保護，會使用 filePasswordsMap 解密，匯出結果不含密碼（= 解除保護）
  */
 export async function exportPdf({
   filesMap,
   pages,
   signatures,
   savedSignatures,
+  filePasswordsMap = {},
+  outputPassword,
 }: ExportPdfParams): Promise<Blob> {
-  // 1. 載入所有來源 PDF 文件並進行快取
+  // 1. 載入所有來源 PDF 文件並進行快取（若有密碼則傳入解密）
   const loadedDocsMap: Record<string, PDFDocument> = {};
   for (const [fileId, fileObj] of Object.entries(filesMap)) {
     const bytes = await fileObj.arrayBuffer();
-    loadedDocsMap[fileId] = await PDFDocument.load(bytes);
+    const password = filePasswordsMap[fileId];
+    loadedDocsMap[fileId] = await PDFDocument.load(bytes, {
+      ...(password ? ({ password } as unknown as Parameters<typeof PDFDocument.load>[1]) : {}),
+    });
   }
   
   // 2. 建立全新的 PDF 文件
@@ -215,7 +227,17 @@ export async function exportPdf({
     newDoc.addPage(copiedPage);
   }
   
-  // 5. 輸出 PDF 位元組並打包為 Blob
+  // 5. 輸出 PDF 位元組並按需加密
   const pdfBytes = await newDoc.save();
-  return new Blob([pdfBytes.buffer as ArrayBuffer], { type: "application/pdf" });
+
+  // 若有設定輸出密碼，使用 encryptPDF 進行 RC4 128-bit 加密
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let finalBytes: any;
+  if (outputPassword) {
+    finalBytes = await encryptPDF(pdfBytes, outputPassword, outputPassword);
+  } else {
+    finalBytes = pdfBytes;
+  }
+
+  return new Blob([finalBytes.buffer as ArrayBuffer], { type: "application/pdf" });
 }
