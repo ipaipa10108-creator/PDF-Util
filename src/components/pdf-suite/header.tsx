@@ -80,12 +80,13 @@ export function Header({
   onCompressionRatioChange,
 }: HeaderProps) {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isCompressionOpen, setIsCompressionOpen] = useState(false);
   return (
     <header className="sticky top-0 z-40 w-full border-b backdrop-blur-md transition-colors duration-200 bg-white/80 border-slate-200 dark:bg-slate-900/80 dark:border-slate-800">
-      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
+      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-2 px-3 sm:px-6 lg:px-8">
         
         {/* LOGO 與標題 */}
-        <div className="flex items-center gap-2 cursor-pointer" onClick={onReset}>
+        <div className="flex shrink-0 items-center gap-2 cursor-pointer" onClick={onReset}>
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-tr from-indigo-500 to-violet-500 text-white shadow-lg shadow-indigo-500/30">
             <FileText className="h-5.5 w-5.5" />
           </div>
@@ -96,34 +97,12 @@ export function Header({
 
         {/* 檔案資訊與主要控制區 (當有載入 PDF 時) */}
         {fileName && (
-          <div className="hidden flex-1 items-center justify-center gap-4 px-6 md:flex">
+          <div className="hidden min-w-0 flex-1 items-center justify-center gap-3 px-4 md:flex">
             <div className="flex items-center gap-2 rounded-lg bg-slate-100 dark:bg-slate-800/60 px-3 py-1.5 text-xs text-slate-600 dark:text-slate-300 font-medium max-w-[200px] truncate">
               <span className="truncate">{fileName}</span>
               <span className="rounded bg-slate-200 dark:bg-slate-700 px-1 py-0.5 text-[10px] text-slate-500 dark:text-slate-400">
                 {totalPages} 頁
               </span>
-            </div>
-            
-
-            {/* PDF 壓縮比例 Slider */}
-            <div className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/20 px-3 py-1.5" title="調整下載與分享時的 PDF 壓縮比例；100% 會優先保留原始向量品質">
-              <SlidersHorizontal className="h-4 w-4 text-indigo-500" />
-              <div className="flex flex-col gap-1 min-w-[150px]">
-                <div className="flex items-center justify-between text-[10px] font-bold text-slate-500 dark:text-slate-400">
-                  <span>壓縮比例</span>
-                  <span>{compressionRatio}%</span>
-                </div>
-                <input
-                  type="range"
-                  min="20"
-                  max="100"
-                  step="5"
-                  value={compressionRatio}
-                  onChange={(event) => onCompressionRatioChange(Number(event.target.value))}
-                  className="h-1.5 w-full accent-indigo-500"
-                  aria-label="PDF 壓縮比例"
-                />
-              </div>
             </div>
 
             {/* 快速選取分組 */}
@@ -164,7 +143,7 @@ export function Header({
         )}
 
         {/* 右側操作按鈕 */}
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
           {fileName && (
             <div className="hidden md:flex items-center gap-1.5 border-r border-slate-200 dark:border-slate-800 pr-3 mr-1">
               {/* 旋轉功能按鈕 */}
@@ -257,10 +236,68 @@ export function Header({
                 </button>
               </div>
 
+
+              {/* PDF 壓縮設定 - 手機與桌面皆使用按鈕開啟 Slider，避免工具列過寬 */}
+              <div className="relative mr-1">
+                <button
+                  onClick={() => {
+                    setIsCompressionOpen(!isCompressionOpen);
+                    setIsSettingsOpen(false);
+                  }}
+                  className={`flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-bold transition-all
+                    ${isCompressionOpen
+                      ? "border-indigo-500 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400"
+                      : "border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300"
+                    }
+                  `}
+                  title={`PDF 壓縮比例：${compressionRatio}%`}
+                >
+                  <SlidersHorizontal className="h-4 w-4" />
+                  <span className="hidden sm:inline">壓縮</span>
+                  <span>{compressionRatio}%</span>
+                </button>
+
+                {isCompressionOpen && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setIsCompressionOpen(false)} />
+                    <div className="absolute right-0 z-50 mt-2 w-72 rounded-xl border border-slate-200 bg-white p-4 text-xs shadow-xl animate-scale-in dark:border-slate-800 dark:bg-slate-900">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <div className="font-bold text-slate-700 dark:text-slate-200">PDF 壓縮比例</div>
+                          <div className="mt-0.5 text-[10px] leading-relaxed text-slate-400 dark:text-slate-500">
+                            100% 保留向量品質；較低比例會以 JPEG 重繪以縮小檔案。
+                          </div>
+                        </div>
+                        <span className="rounded-lg bg-indigo-500/10 px-2 py-1 text-sm font-black text-indigo-600 dark:text-indigo-400">
+                          {compressionRatio}%
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="20"
+                        max="100"
+                        step="5"
+                        value={compressionRatio}
+                        onChange={(event) => onCompressionRatioChange(Number(event.target.value))}
+                        className="mt-4 h-2 w-full accent-indigo-500"
+                        aria-label="PDF 壓縮比例"
+                      />
+                      <div className="mt-2 flex justify-between text-[10px] font-semibold text-slate-400 dark:text-slate-500">
+                        <span>較小檔案</span>
+                        <span>較高品質</span>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+
               {/* 貼圖操作設定 - 齒輪 Popover */}
               <div className="relative mr-1">
                 <button
-                  onClick={() => setIsSettingsOpen(!isSettingsOpen)}
+                  onClick={() => {
+                    setIsSettingsOpen(!isSettingsOpen);
+                    setIsCompressionOpen(false);
+                  }}
                   className={`flex h-9 w-9 items-center justify-center rounded-lg border transition-all
                     ${isSettingsOpen
                       ? "border-indigo-500 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400"
