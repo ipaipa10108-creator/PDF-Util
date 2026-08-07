@@ -102,6 +102,10 @@ export default function MainPage() {
   // 緩存最近一次導出成功的 Blob，以供 Web Share 分享使用
   const [exportedBlob, setExportedBlob] = useState<Blob | null>(null);
   const [canShare, setCanShare] = useState(false);
+  const [compressionRatio, setCompressionRatio] = useLocalStorage<number>(
+    "local_pdf_compression_ratio",
+    100
+  );
 
   // 匹出密碼彈窗狀態
   const [isExportPasswordModalOpen, setIsExportPasswordModalOpen] = useState(false);
@@ -592,6 +596,7 @@ export default function MainPage() {
       savedSignatures,
       filePasswordsMap,
       outputPassword,
+      compressionRatio,
     });
   };
 
@@ -731,6 +736,11 @@ export default function MainPage() {
         onRedo={handleRedo}
         stampControlMode={stampControlMode}
         onChangeControlMode={setStampControlMode}
+        compressionRatio={compressionRatio}
+        onCompressionRatioChange={(ratio) => {
+          setCompressionRatio(ratio);
+          setExportedBlob(null);
+        }}
       />
 
       {/* 主要內容區 */}
