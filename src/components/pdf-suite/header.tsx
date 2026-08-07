@@ -16,7 +16,8 @@ import {
   Bookmark,
   Undo2,
   Redo2,
-  Settings
+  Settings,
+  SlidersHorizontal
 } from "lucide-react";
 
 export interface HeaderProps {
@@ -45,6 +46,8 @@ export interface HeaderProps {
   onRedo: () => void;
   stampControlMode: "buttons" | "double_click";
   onChangeControlMode: (mode: "buttons" | "double_click") => void;
+  compressionRatio: number;
+  onCompressionRatioChange: (ratio: number) => void;
 }
 
 export function Header({
@@ -73,6 +76,8 @@ export function Header({
   onRedo,
   stampControlMode,
   onChangeControlMode,
+  compressionRatio,
+  onCompressionRatioChange,
 }: HeaderProps) {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   return (
@@ -99,6 +104,28 @@ export function Header({
               </span>
             </div>
             
+
+            {/* PDF 壓縮比例 Slider */}
+            <div className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/20 px-3 py-1.5" title="調整下載與分享時的 PDF 壓縮比例；100% 會優先保留原始向量品質">
+              <SlidersHorizontal className="h-4 w-4 text-indigo-500" />
+              <div className="flex flex-col gap-1 min-w-[150px]">
+                <div className="flex items-center justify-between text-[10px] font-bold text-slate-500 dark:text-slate-400">
+                  <span>壓縮比例</span>
+                  <span>{compressionRatio}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="20"
+                  max="100"
+                  step="5"
+                  value={compressionRatio}
+                  onChange={(event) => onCompressionRatioChange(Number(event.target.value))}
+                  className="h-1.5 w-full accent-indigo-500"
+                  aria-label="PDF 壓縮比例"
+                />
+              </div>
+            </div>
+
             {/* 快速選取分組 */}
             <div className="flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/20 p-1">
               <button

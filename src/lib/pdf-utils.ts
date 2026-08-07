@@ -177,6 +177,8 @@ interface ExportPdfParams {
   filePasswordsMap?: Record<string, string>;
   /** 匯出 PDF 的密碼：字串 = 加密，undefined/null = 不加密 */
   outputPassword?: string | null;
+  /** PDF 輸出品質比例：100 = 保留原始向量頁面，低於 100 會將頁面重繪為 JPEG 以壓縮檔案 */
+  compressionRatio?: number;
 }
 
 /**
@@ -190,7 +192,12 @@ export async function exportPdf({
   savedSignatures,
   filePasswordsMap = {},
   outputPassword,
+  compressionRatio = 100,
 }: ExportPdfParams): Promise<Blob> {
+  const normalizedCompressionRatio = Math.min(100, Math.max(1, compressionRatio));
+  const shouldRasterizeForCompression = normalizedCompressionRatio < 100;
+  const imageQuality = 0.32 + (normalizedCompressionRatio / 100) * 0.6;
+  const renderScale = 0.7 + (normalizedCompressionRatio / 100) * 1.3;
   // 1. 載入 pdf-lib 文件 (無視加密供結構讀取) 與 pdfjs 文件 (用密碼解密供高解析度重繪)
   const loadedDocsMap: Record<string, PDFDocument> = {};
   const pdfjsDocsMap: Record<string, any> = {};
@@ -201,11 +208,14 @@ export async function exportPdf({
       ignoreEncryption: true,
     });
 
-    // 如果該檔案有開啟密碼，使用 pdfjs-dist 加載解密後的文件
+    // 如果需要解密或壓縮，使用 pdfjs-dist 加載文件供後續重繪
     const password = filePasswordsMap[fileId];
-    if (password !== undefined && password.length > 0) {
+    if ((password !== undefined && password.length > 0) || shouldRasterizeForCompression) {
       const pdfjs = await getPdfjsLib();
-      const loadingParams: any = { data: bytes.slice(0), password };
+      const loadingParams: any = { data: bytes.slice(0) };
+      if (password !== undefined && password.length > 0) {
+        loadingParams.password = password;
+      }
       const loadingTask = pdfjs.getDocument(loadingParams);
       loadingTask.onPassword = (updatePassword: Function, reason: number) => {
         const err: any = new Error("Password required");
@@ -240,9 +250,12 @@ export async function exportPdf({
     let pageH = pageConfig.height;
 
     if (pdfjsDoc) {
-      // 🌟 加密 PDF 解密導出：透過 PDF.js 將解密頁面渲染為 2.0x 高解析度圖像繪入新頁面 (防止內容空白)
+      // 🌟 加密 PDF 解密導出或壓縮導出：透過 PDF.js 將頁面渲染為 JPEG 圖像繪入新頁面
       const pdfjsPage = await pdfjsDoc.getPage(pageConfig.sourcePageIndex + 1);
-      const viewport = pdfjsPage.getViewport({ scale: 2.0 });
+      const pdfViewport = pdfjsPage.getViewport({ scale: 1.0 });
+      pageW = pdfViewport.width;
+      pageH = pdfViewport.height;
+      const viewport = pdfjsPage.getViewport({ scale: shouldRasterizeForCompression ? renderScale : 2.0 });
 
       const canvas = document.createElement("canvas");
       canvas.width = viewport.width;
@@ -256,7 +269,7 @@ export async function exportPdf({
         await pdfjsPage.render({ canvasContext: ctx, viewport }).promise;
       }
 
-      const imgDataUrl = canvas.toDataURL("image/jpeg", 0.92);
+      const imgDataUrl = canvas.toDataURL("image/jpeg", shouldRasterizeForCompression ? imageQuality : 0.92);
       const base64Data = imgDataUrl.split(",")[1];
       const imgBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
 
