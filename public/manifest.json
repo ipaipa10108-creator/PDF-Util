@@ -28,10 +28,17 @@
     "params": {
       "files": [
         {
-          "name": "pdf_files",
+          "name": "shared_files",
           "accept": [
             "application/pdf",
-            ".pdf"
+            ".pdf",
+            "image/*",
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".webp",
+            ".gif",
+            ".bmp"
           ]
         }
       ]

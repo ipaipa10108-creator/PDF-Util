@@ -36,6 +36,110 @@ export interface SavedSignature {
 
 let pdfjsInstance: typeof PdfJsType | null = null;
 
+/**
+ * 檢查檔案是否為圖檔
+ */
+export function isImageFile(file: File): boolean {
+  if (file.type && file.type.startsWith("image/")) return true;
+  const ext = file.name.split(".").pop()?.toLowerCase();
+  return ["jpg", "jpeg", "png", "webp", "bmp", "gif", "svg", "avif", "heic"].includes(ext || "");
+}
+
+/**
+ * 檢查檔案是否為 PDF 檔案
+ */
+export function isPdfFile(file: File): boolean {
+  if (file.type === "application/pdf") return true;
+  const ext = file.name.split(".").pop()?.toLowerCase();
+  return ext === "pdf";
+}
+
+/**
+ * 將單張圖片透過 Canvas 讀取並嵌入到 PDFDocument 的一頁中
+ */
+async function addImagePageToPdfDoc(pdfDoc: PDFDocument, imageFile: File): Promise<void> {
+  const imgUrl = URL.createObjectURL(imageFile);
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error(`無法解析圖檔: ${imageFile.name}`));
+      el.src = imgUrl;
+    });
+
+    const naturalWidth = img.naturalWidth || img.width;
+    const naturalHeight = img.naturalHeight || img.height;
+
+    if (!naturalWidth || !naturalHeight) {
+      throw new Error(`圖檔尺寸無效: ${imageFile.name}`);
+    }
+
+    // 透過 Canvas 標準化影像，確保不論是 webp、gif、bmp 都能轉為標準 JPEG 格式嵌入 pdf-lib
+    const canvas = document.createElement("canvas");
+    canvas.width = naturalWidth;
+    canvas.height = naturalHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("瀏覽器不支援 Canvas 繪製");
+
+    // 填充白底，防透明 PNG 轉黑底
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, naturalWidth, naturalHeight);
+    ctx.drawImage(img, 0, 0, naturalWidth, naturalHeight);
+
+    const blob = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob((b) => resolve(b), "image/jpeg", 0.95);
+    });
+
+    if (!blob) throw new Error(`圖片轉碼失敗: ${imageFile.name}`);
+
+    const imgBytes = await blob.arrayBuffer();
+    const embeddedImg = await pdfDoc.embedJpg(imgBytes);
+
+    const page = pdfDoc.addPage([naturalWidth, naturalHeight]);
+    page.drawImage(embeddedImg, {
+      x: 0,
+      y: 0,
+      width: naturalWidth,
+      height: naturalHeight,
+    });
+  } finally {
+    URL.revokeObjectURL(imgUrl);
+  }
+}
+
+/**
+ * 將單一圖片轉換為單頁 PDF File
+ */
+export async function convertImageToPdfFile(imageFile: File): Promise<File> {
+  const pdfDoc = await PDFDocument.create();
+  await addImagePageToPdfDoc(pdfDoc, imageFile);
+  const pdfBytes = await pdfDoc.save();
+  const baseName = imageFile.name.replace(/\.[^.]+$/, "");
+  return new File([pdfBytes.buffer as ArrayBuffer], `${baseName || "image"}.pdf`, {
+    type: "application/pdf",
+  });
+}
+
+/**
+ * 將多張圖片轉換為包含多頁的單一 PDF File
+ */
+export async function convertImagesToSinglePdfFile(
+  imageFiles: File[],
+  outputName = "merged_images.pdf"
+): Promise<File> {
+  if (imageFiles.length === 0) {
+    throw new Error("請至少提供一張圖片。");
+  }
+  const pdfDoc = await PDFDocument.create();
+  for (const imgFile of imageFiles) {
+    await addImagePageToPdfDoc(pdfDoc, imgFile);
+  }
+  const pdfBytes = await pdfDoc.save();
+  return new File([pdfBytes.buffer as ArrayBuffer], outputName, {
+    type: "application/pdf",
+  });
+}
+
 async function getPdfjsLib(): Promise<typeof PdfJsType> {
   if (typeof window === "undefined") {
     throw new Error("PDF.js can only be loaded in browser environment");
@@ -340,10 +444,9 @@ export async function exportPdf({
   // 5. 輸出 PDF 位元組並按需加密
   const pdfBytes = await newDoc.save();
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let finalBytes: any;
+  let finalBytes: Uint8Array;
   if (outputPassword) {
-    finalBytes = await encryptPDF(pdfBytes, outputPassword, outputPassword);
+    finalBytes = (await encryptPDF(pdfBytes, outputPassword, outputPassword)) as Uint8Array;
   } else {
     finalBytes = pdfBytes;
   }

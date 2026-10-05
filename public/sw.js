@@ -24,12 +24,57 @@ self.addEventListener("fetch", (event) => {
       (async () => {
         try {
           const formData = await event.request.formData();
-          const file = formData.get("pdf_files");
+          const files = [];
 
-          if (file && file instanceof File) {
-            // 將分享進來的 PDF 檔案包裝成 Response 暫存至 Cache Storage 中
+          // 從 FormData 中收集所有 File 物件（相容 shared_files, pdf_files, 或是多個獨立欄位）
+          for (const entry of formData.values()) {
+            if (entry && typeof entry === "object" && typeof entry.arrayBuffer === "function") {
+              files.push(entry);
+            }
+          }
+
+          if (files.length > 0) {
             const cache = await caches.open(CACHE_NAME);
-            await cache.put("/shared-file.pdf", new Response(file));
+            
+            // 清理舊的快取內容
+            const existingKeys = await cache.keys();
+            for (const req of existingKeys) {
+              await cache.delete(req);
+            }
+
+            const fileMetaList = [];
+            for (let i = 0; i < files.length; i++) {
+              const file = files[i];
+              const fileKey = `/shared-file-${i}`;
+              await cache.put(
+                fileKey,
+                new Response(file, {
+                  headers: {
+                    "Content-Type": file.type || "application/octet-stream",
+                    "X-Filename": encodeURIComponent(file.name || `shared_file_${i + 1}`),
+                  },
+                })
+              );
+              fileMetaList.push({
+                key: fileKey,
+                name: file.name || `shared_file_${i + 1}`,
+                type: file.type || "",
+                size: file.size || 0,
+              });
+            }
+
+            // 儲存檔案清單中繼資料
+            await cache.put(
+              "/shared-files-meta.json",
+              new Response(JSON.stringify({ files: fileMetaList }), {
+                headers: { "Content-Type": "application/json" },
+              })
+            );
+
+            // 相容舊版第一筆
+            if (files[0]) {
+              await cache.put("/shared-file.pdf", new Response(files[0]));
+            }
 
             // 以 303 Redirect 重導向到 GET 模式的首頁，並帶上 ?shared=true 參數
             return Response.redirect("/PDF-Util/?shared=true", 303);

@@ -182,14 +182,14 @@ export function Header({
                 <Trash2 className="h-4.5 w-4.5" />
               </button>
 
-              {/* 插入 PDF 按鈕 */}
+              {/* 插入 PDF/圖檔 按鈕 */}
               <button
                 onClick={onOpenInsertModal}
                 className="flex items-center gap-1.5 h-9 px-3 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition-all font-semibold text-xs"
-                title="插入另一個 PDF 文件頁面"
+                title="插入外部 PDF 文件或圖檔 (JPG, PNG 等)"
               >
                 <FilePlus2 className="h-4 w-4" />
-                <span>插入頁面</span>
+                <span>插入頁面 / 圖檔</span>
               </button>
 
               {/* 新增圖章按鈕 */}

@@ -1,7 +1,14 @@
 import React, { useState, useRef, useEffect } from "react";
-import { X, FileText, Check, FilePlus2, AlertCircle, Loader2 } from "lucide-react";
+import { X, FileText, Check, FilePlus2, AlertCircle, Loader2, Image as ImageIcon } from "lucide-react";
 import { PDFDocument } from "pdf-lib";
-import { loadPdfPages, PdfPageInfo } from "@/lib/pdf-utils";
+import { 
+  loadPdfPages, 
+  PdfPageInfo, 
+  isImageFile, 
+  isPdfFile, 
+  convertImageToPdfFile, 
+  convertImagesToSinglePdfFile 
+} from "@/lib/pdf-utils";
 
 export interface InsertModalProps {
   mainPdfTotalPages: number;
@@ -19,6 +26,8 @@ export function InsertModal({
   const [file, setFile] = useState<File | null>(null);
   const [totalPages, setTotalPages] = useState<number>(0);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [originalFileNames, setOriginalFileNames] = useState<string>("");
+  const [isImageSource, setIsImageSource] = useState<boolean>(false);
   
   // 插入參數設定
   const [pageOption, setPageOption] = useState<"all" | "custom">("all");
@@ -33,26 +42,76 @@ export function InsertModal({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 處理檔案加載並讀取總頁數
-  const processFile = async (selectedFile: File) => {
+  // 處理檔案加載並讀取總頁數（支援單/多個 PDF 或圖檔）
+  const processIncomingFiles = async (incomingFiles: File[]) => {
+    if (!incomingFiles || incomingFiles.length === 0) return;
     setIsLoading(true);
     try {
-      const arrayBuffer = await selectedFile.arrayBuffer();
+      const validFiles = incomingFiles.filter(f => isPdfFile(f) || isImageFile(f));
+      if (validFiles.length === 0) {
+        alert("請選擇 PDF 文件或常見圖檔格式 (JPG, PNG, WebP, GIF, BMP 等)。");
+        return;
+      }
+
+      let processedPdf: File;
+      const allImages = validFiles.every(f => isImageFile(f));
+      const hasImage = validFiles.some(f => isImageFile(f));
+
+      if (allImages) {
+        // 全是圖片
+        setIsImageSource(true);
+        if (validFiles.length === 1) {
+          setOriginalFileNames(validFiles[0].name);
+          processedPdf = await convertImageToPdfFile(validFiles[0]);
+        } else {
+          setOriginalFileNames(`${validFiles.length} 張圖片 (${validFiles[0].name} 等)`);
+          processedPdf = await convertImagesToSinglePdfFile(validFiles, `merged_${validFiles.length}_images.pdf`);
+        }
+      } else if (validFiles.length === 1 && isPdfFile(validFiles[0])) {
+        // 單一 PDF
+        setIsImageSource(false);
+        setOriginalFileNames(validFiles[0].name);
+        processedPdf = validFiles[0];
+      } else {
+        // 混合多個檔案或多個 PDF
+        setIsImageSource(hasImage);
+        setOriginalFileNames(`${validFiles.length} 個檔案 (${validFiles[0].name} 等)`);
+        // 逐一轉為 PDF 並合併
+        const pdfDoc = await PDFDocument.create();
+        for (const item of validFiles) {
+          if (isImageFile(item)) {
+            const singlePdf = await convertImageToPdfFile(item);
+            const bytes = await singlePdf.arrayBuffer();
+            const loaded = await PDFDocument.load(bytes);
+            const copiedPages = await pdfDoc.copyPages(loaded, loaded.getPageIndices());
+            copiedPages.forEach(p => pdfDoc.addPage(p));
+          } else {
+            const bytes = await item.arrayBuffer();
+            const loaded = await PDFDocument.load(bytes, { ignoreEncryption: true });
+            const copiedPages = await pdfDoc.copyPages(loaded, loaded.getPageIndices());
+            copiedPages.forEach(p => pdfDoc.addPage(p));
+          }
+        }
+        const mergedBytes = await pdfDoc.save();
+        processedPdf = new File([mergedBytes.buffer as ArrayBuffer], "merged_insert.pdf", { type: "application/pdf" });
+      }
+
+      const arrayBuffer = await processedPdf.arrayBuffer();
       const pdfDoc = await PDFDocument.load(arrayBuffer);
       const pagesCount = pdfDoc.getPageCount();
-      
-      setFile(selectedFile);
+
+      setFile(processedPdf);
       setTotalPages(pagesCount);
-      setCustomRange(`1-${pagesCount}`); // 預設填入全部範圍
+      setCustomRange(`1-${pagesCount}`);
       setRangeError(null);
-      
+
       // 重置預覽
       setPreviewPages([]);
       setRenderPreviews(false);
       setSelectedPageIndices(new Set());
     } catch (error) {
-      console.error("Error reading inserted PDF", error);
-      alert("無法讀取此 PDF 檔案，請確保檔案未受損且無密碼保護。");
+      console.error("Error processing inserted files", error);
+      alert("無法讀取或處理此檔案，請確保檔案格式正確且無受損。\n詳細資訊：" + (error instanceof Error ? error.message : String(error)));
     } finally {
       setIsLoading(false);
     }
@@ -61,18 +120,14 @@ export function InsertModal({
   // 監聽外部拖入預設檔案的變化
   useEffect(() => {
     if (presetFile) {
-      processFile(presetFile);
+      processIncomingFiles([presetFile]);
     }
   }, [presetFile]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const selectedFile = e.target.files[0];
-      if (selectedFile.type !== "application/pdf") {
-        alert("請選擇 PDF 格式的檔案。");
-        return;
-      }
-      processFile(selectedFile);
+    if (e.target.files && e.target.files.length > 0) {
+      const selectedFiles = Array.from(e.target.files);
+      processIncomingFiles(selectedFiles);
     }
   };
 
@@ -210,9 +265,9 @@ export function InsertModal({
         {/* 標頭 */}
         <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 px-6 py-4">
           <div className="flex items-center gap-2 text-indigo-500">
-            <FilePlus2 className="h-5 w-5" />
+            {isImageSource ? <ImageIcon className="h-5 w-5" /> : <FilePlus2 className="h-5 w-5" />}
             <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">
-              插入外部 PDF 文件
+              插入外部檔案 (PDF 或圖檔)
             </h3>
           </div>
           <button
@@ -236,14 +291,21 @@ export function InsertModal({
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".pdf"
+                accept=".pdf,application/pdf,image/*,.jpg,.jpeg,.png,.webp,.bmp,.gif"
+                multiple
                 onChange={handleFileChange}
                 className="hidden"
               />
-              <FilePlus2 className="h-10 w-10 text-slate-400 mb-3 group-hover:scale-110 transition-transform" />
-              <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                選擇要插入的 PDF 文件
+              <div className="flex items-center gap-2 mb-3">
+                <FilePlus2 className="h-8 w-8 text-indigo-400 group-hover:scale-110 transition-transform" />
+                <ImageIcon className="h-8 w-8 text-sky-400 group-hover:scale-110 transition-transform" />
+              </div>
+              <span className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                選擇要插入的 PDF 文件或圖檔
               </span>
+              <p className="text-[11px] text-slate-400 max-w-sm">
+                支援 PDF 文件與 JPG、PNG、WebP 等圖檔格式，支援單圖或多張圖檔同時選取合併插入
+              </p>
             </div>
           ) : (
             /* 已選擇的檔案資訊與插入設定 */
@@ -252,19 +314,23 @@ export function InsertModal({
               <div className="flex items-center justify-between rounded-xl border border-indigo-100/50 dark:border-indigo-950/40 bg-indigo-50/20 dark:bg-indigo-950/10 p-4">
                 <div className="flex items-center gap-3">
                   <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-500 text-white shadow-md">
-                    <FileText className="h-5 w-5" />
+                    {isImageSource ? <ImageIcon className="h-5 w-5" /> : <FileText className="h-5 w-5" />}
                   </div>
                   <div>
-                    <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 max-w-[240px] truncate">
-                      {file.name}
+                    <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 max-w-[240px] truncate" title={originalFileNames || file.name}>
+                      {originalFileNames || file.name}
                     </h4>
-                    <p className="text-[10px] text-slate-400 font-semibold">共 {totalPages} 頁</p>
+                    <p className="text-[10px] text-slate-400 font-semibold">
+                      {isImageSource ? "圖檔已自動轉為 PDF 頁面 · " : ""}共 {totalPages} 頁
+                    </p>
                   </div>
                 </div>
                 <button
                   onClick={() => {
                     setFile(null);
                     setTotalPages(0);
+                    setOriginalFileNames("");
+                    setIsImageSource(false);
                     setPreviewPages([]);
                   }}
                   className="text-xs text-rose-500 font-bold hover:underline"

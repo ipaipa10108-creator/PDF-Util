@@ -3,12 +3,21 @@ import { UploadCloud, ShieldCheck, Lock, EyeOff } from "lucide-react";
 
 export interface DropzoneProps {
   onFileSelect: (file: File) => void;
+  onFilesSelect?: (files: File[]) => void;
   isLoading: boolean;
 }
 
-export function Dropzone({ onFileSelect, isLoading }: DropzoneProps) {
+export function Dropzone({ onFileSelect, onFilesSelect, isLoading }: DropzoneProps) {
   const [isDragActive, setIsDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const filterSupportedFiles = (fileList: FileList | File[]): File[] => {
+    return Array.from(fileList).filter(f => {
+      if (f.type === "application/pdf" || f.type.startsWith("image/")) return true;
+      const ext = f.name.split(".").pop()?.toLowerCase();
+      return ["pdf", "jpg", "jpeg", "png", "webp", "bmp", "gif", "svg", "avif"].includes(ext || "");
+    });
+  };
 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
@@ -25,19 +34,31 @@ export function Dropzone({ onFileSelect, isLoading }: DropzoneProps) {
     e.stopPropagation();
     setIsDragActive(false);
 
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      const file = e.dataTransfer.files[0];
-      if (file.type === "application/pdf") {
-        onFileSelect(file);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const validFiles = filterSupportedFiles(e.dataTransfer.files);
+      if (validFiles.length > 0) {
+        if (onFilesSelect) {
+          onFilesSelect(validFiles);
+        } else {
+          onFileSelect(validFiles[0]);
+        }
+      } else {
+        alert("請選擇標準 PDF 格式或常見圖檔 (JPG, PNG, WebP 等)。");
       }
     }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      if (file.type === "application/pdf") {
-        onFileSelect(file);
+    if (e.target.files && e.target.files.length > 0) {
+      const validFiles = filterSupportedFiles(e.target.files);
+      if (validFiles.length > 0) {
+        if (onFilesSelect) {
+          onFilesSelect(validFiles);
+        } else {
+          onFileSelect(validFiles[0]);
+        }
+      } else {
+        alert("請選擇標準 PDF 格式或常見圖檔 (JPG, PNG, WebP 等)。");
       }
     }
   };
@@ -65,7 +86,8 @@ export function Dropzone({ onFileSelect, isLoading }: DropzoneProps) {
         <input
           ref={fileInputRef}
           type="file"
-          accept=".pdf"
+          accept=".pdf,application/pdf,image/*,.jpg,.jpeg,.png,.webp,.bmp,.gif"
+          multiple
           onChange={handleFileChange}
           className="hidden"
           disabled={isLoading}
@@ -78,10 +100,10 @@ export function Dropzone({ onFileSelect, isLoading }: DropzoneProps) {
 
         {/* 主要文字 */}
         <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100 mb-2">
-          {isLoading ? "正在載入並解析 PDF 文件..." : "拖放 PDF 檔案至此，或點擊瀏覽"}
+          {isLoading ? "正在載入並解析文件..." : "拖放 PDF 或圖檔至此，或點擊瀏覽"}
         </h3>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mb-8 max-w-sm">
-          僅支援標準 PDF 格式文件。文件解析、渲染與修改將 100% 在您的瀏覽器沙盒中完成。
+        <p className="text-sm text-slate-500 dark:text-slate-400 mb-8 max-w-md">
+          支援標準 PDF 文件與常見圖檔 (JPG, PNG, WebP 等)，可多選檔案一次載入合併。文件解析、渲染與修改將 100% 在您的瀏覽器沙盒中完成。
         </p>
 
         {/* 資安宣告卡片 */}

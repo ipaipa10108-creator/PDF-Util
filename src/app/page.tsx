@@ -20,7 +20,11 @@ import {
   PlacedSignature, 
   SavedSignature, 
   loadPdfPages, 
-  exportPdf 
+  exportPdf,
+  isImageFile,
+  isPdfFile,
+  convertImageToPdfFile,
+  convertImagesToSinglePdfFile
 } from "@/lib/pdf-utils";
 
 interface WebShareNavigator {
@@ -147,27 +151,54 @@ export default function MainPage() {
         .catch((err) => console.error("PWA Service Worker 註冊失敗:", err));
     }
 
-    // 2. 檢測是否有系統分享進來的檔案
+    // 2. 檢測是否有系統分享進來的檔案（支援多檔案、PDF 與圖檔一併接收）
     const checkSharedFile = async () => {
       const urlParams = new URLSearchParams(window.location.search);
       if (urlParams.get("shared") === "true") {
         try {
           setIsLoading(true);
           const cache = await caches.open("shared-pdf-cache-v1");
-          const response = await cache.match("/shared-file.pdf");
-          
-          if (response) {
-            const blob = await response.blob();
-            // 包裝為 File 物件
-            const sharedFile = new File([blob], "shared_document.pdf", {
-              type: "application/pdf",
-            });
-            
-            // 載入該 PDF 檔案
-            await handleFileSelect(sharedFile);
-            
-            // 清除快取中的暫存檔案，防二次載入
-            await cache.delete("/shared-file.pdf");
+          const receivedFiles: File[] = [];
+
+          // A. 優先嘗試讀取中繼檔案列表 (/shared-files-meta.json)
+          const metaRes = await cache.match("/shared-files-meta.json");
+          if (metaRes) {
+            try {
+              const metaData = await metaRes.json();
+              if (Array.isArray(metaData.files)) {
+                for (const item of metaData.files) {
+                  const fileRes = await cache.match(item.key);
+                  if (fileRes) {
+                    const blob = await fileRes.blob();
+                    const fileName = item.name ? decodeURIComponent(item.name) : "shared_file";
+                    receivedFiles.push(new File([blob], fileName, { type: item.type || blob.type }));
+                    await cache.delete(item.key);
+                  }
+                }
+              }
+            } catch (err) {
+              console.warn("解析分享清單失敗，回退至單檔模式:", err);
+            }
+            await cache.delete("/shared-files-meta.json");
+          }
+
+          // B. 相容舊版或單一分享路徑 (/shared-file.pdf)
+          if (receivedFiles.length === 0) {
+            const singleResponse = await cache.match("/shared-file.pdf");
+            if (singleResponse) {
+              const blob = await singleResponse.blob();
+              receivedFiles.push(new File([blob], "shared_document.pdf", {
+                type: blob.type || "application/pdf",
+              }));
+              await cache.delete("/shared-file.pdf");
+            }
+          } else {
+            await cache.delete("/shared-file.pdf").catch(() => {});
+          }
+
+          // C. 若成功接收到檔案，進行批次載入處理
+          if (receivedFiles.length > 0) {
+            await handleBatchFilesSelect(receivedFiles);
           }
           
           // 清除 URL 上的分享參數，保持乾淨
@@ -181,6 +212,7 @@ export default function MainPage() {
     };
 
     checkSharedFile();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleToggleDarkMode = () => {
@@ -203,8 +235,125 @@ export default function MainPage() {
     return e["name"] === "PasswordException" || (typeof e["message"] === "string" && (e["message"] as string).toLowerCase().includes("password"));
   };
 
-  // 檔案選取處理
+  // 批次檔案選取/分享載入處理（支援多個 PDF 與圖檔）
+  const handleBatchFilesSelect = async (incomingFiles: File[]) => {
+    if (!incomingFiles || incomingFiles.length === 0) return;
+    setIsLoading(true);
+    try {
+      // 1. 過濾支援的檔案格式
+      const validFiles = incomingFiles.filter(f => isPdfFile(f) || isImageFile(f));
+      if (validFiles.length === 0) {
+        alert("請選擇標準 PDF 格式或常見圖檔 (JPG, PNG, WebP 等)。");
+        return;
+      }
+
+      // 2. 將所有圖片檔案轉換為 PDF 檔案
+      const normalizedFiles: File[] = [];
+      for (const item of validFiles) {
+        if (isImageFile(item)) {
+          const pdfFile = await convertImageToPdfFile(item);
+          normalizedFiles.push(pdfFile);
+        } else {
+          normalizedFiles.push(item);
+        }
+      }
+
+      // 3. 判斷目前是否已有開啟中的文件
+      if (!file || pages.length === 0) {
+        // 全新開啟：第 1 個檔案作為主檔案
+        const firstFile = normalizedFiles[0];
+        const firstFileId = "file-main";
+        
+        let initialPages: PdfPageInfo[] = [];
+        try {
+          initialPages = await loadPdfPages(firstFile, firstFileId);
+        } catch (err) {
+          if (isPasswordError(err)) {
+            setPendingPasswordFile(firstFile);
+            setIsPasswordModalOpen(true);
+            setFile(null);
+            return;
+          }
+          throw err;
+        }
+
+        const newFilesMap: Record<string, File> = { [firstFileId]: firstFile };
+        const combinedPages: PdfPageInfo[] = [...initialPages];
+
+        // 若有後續檔案，依序載入並附加至頁面後方
+        for (let i = 1; i < normalizedFiles.length; i++) {
+          const nextFile = normalizedFiles[i];
+          const nextFileId = `file-append-${Date.now()}-${i}`;
+          newFilesMap[nextFileId] = nextFile;
+          try {
+            const nextPages = await loadPdfPages(nextFile, nextFileId);
+            combinedPages.push(...nextPages);
+          } catch (e) {
+            console.warn(`附加檔案 ${nextFile.name} 載入失敗:`, e);
+          }
+        }
+
+        const reindexedPages = combinedPages.map((p, idx) => ({
+          ...p,
+          pageIndex: idx,
+          pageNumber: idx + 1,
+        }));
+
+        setFile(firstFile);
+        setFilesMap(newFilesMap);
+        setFilePasswordsMap({});
+        setPages(reindexedPages);
+        setExportedBlob(null);
+        setPlacedSignatures([]);
+        setSelectedIndices(new Set());
+        setUndoStack([]);
+        setRedoStack([]);
+      } else {
+        // 目前已有開啟中的文件：將這批新檔案直接附加插入至文件最後方
+        recordHistory();
+        const newFilesMapUpdates: Record<string, File> = {};
+        const appendPages: PdfPageInfo[] = [];
+
+        for (let i = 0; i < normalizedFiles.length; i++) {
+          const nextFile = normalizedFiles[i];
+          const nextFileId = `file-insert-${Date.now()}-${i}`;
+          newFilesMapUpdates[nextFileId] = nextFile;
+          try {
+            const nextPages = await loadPdfPages(nextFile, nextFileId);
+            appendPages.push(...nextPages);
+          } catch (e) {
+            console.warn(`插入檔案 ${nextFile.name} 載入失敗:`, e);
+          }
+        }
+
+        setFilesMap(prev => ({ ...prev, ...newFilesMapUpdates }));
+        setPages(prevPages => {
+          const updated = [...prevPages, ...appendPages];
+          return updated.map((p, idx) => ({
+            ...p,
+            pageIndex: idx,
+            pageNumber: idx + 1,
+          }));
+        });
+
+        setSelectedIndices(new Set());
+        setExportedBlob(null);
+      }
+    } catch (error) {
+      console.error("批次載入檔案失敗:", error);
+      alert("載入或合併檔案時發生錯誤：\n" + (error instanceof Error ? error.message : String(error)));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // 單一檔案選取處理
   const handleFileSelect = async (selectedFile: File, password?: string) => {
+    if (isImageFile(selectedFile)) {
+      await handleBatchFilesSelect([selectedFile]);
+      return;
+    }
+
     setIsLoading(true);
     setExportedBlob(null);
     setPlacedSignatures([]);
@@ -363,13 +512,18 @@ export default function MainPage() {
     
     if (!file) return; // 如果沒載入檔案，走 Dropzone 預設行為
 
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      const droppedFile = e.dataTransfer.files[0];
-      if (droppedFile.type === "application/pdf") {
-        setPresetInsertFile(droppedFile);
-        setIsInsertModalOpen(true);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const droppedFiles = Array.from(e.dataTransfer.files).filter(f => isPdfFile(f) || isImageFile(f));
+      if (droppedFiles.length > 0) {
+        if (droppedFiles.length === 1) {
+          setPresetInsertFile(droppedFiles[0]);
+          setIsInsertModalOpen(true);
+        } else {
+          // 拖入多個檔案，直接批次附加插入
+          handleBatchFilesSelect(droppedFiles);
+        }
       } else {
-        alert("只支援拖放 PDF 格式之檔案進行插入。");
+        alert("只支援拖放 PDF 或圖檔 (JPG, PNG, WebP 等) 格式之檔案進行插入。");
       }
     }
   };
@@ -688,16 +842,16 @@ export default function MainPage() {
       className="flex min-h-screen flex-col bg-slate-50 text-slate-900 transition-colors duration-200 dark:bg-slate-950 dark:text-slate-50 relative"
     >
       
-      {/* 視窗拖曳插入外部 PDF 的懸浮覆蓋層 */}
+      {/* 視窗拖曳插入外部 PDF 或圖檔的懸浮覆蓋層 */}
       {isDragOverWindow && file && (
         <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-indigo-500/10 dark:bg-indigo-950/20 backdrop-blur-md pointer-events-none">
           <div className="flex flex-col items-center justify-center p-12 rounded-3xl border-4 border-dashed border-indigo-500 bg-white/95 dark:bg-slate-900/95 shadow-2xl animate-pulse">
             <FilePlus2 className="h-16 w-16 text-indigo-500 mb-4 animate-bounce" />
             <p className="text-base font-bold text-slate-800 dark:text-slate-100">
-              放開以插入此 PDF 文件
+              放開以插入此 PDF 或圖檔
             </p>
             <p className="text-xs text-slate-400 mt-1">
-              該文件將會被直接載入至插頁對話框中
+              該檔案將會被直接載入至插頁對話框中或附加至頁面後方
             </p>
           </div>
         </div>
@@ -747,7 +901,11 @@ export default function MainPage() {
       <main className="flex-1 flex flex-col justify-center">
         {!file ? (
           /* 上傳檔案前 */
-          <Dropzone onFileSelect={handleFileSelect} isLoading={isLoading} />
+          <Dropzone 
+            onFileSelect={handleFileSelect} 
+            onFilesSelect={handleBatchFilesSelect} 
+            isLoading={isLoading} 
+          />
         ) : (
           /* 載入檔案後 */
           <div className="flex-1 flex flex-col">
